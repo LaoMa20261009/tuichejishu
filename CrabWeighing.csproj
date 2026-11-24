@@ -7,6 +7,7 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>CrabWeighing</RootNamespace>
     <AssemblyName>CrabWeighing</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <PlatformTarget>x86</PlatformTarget>
     <OutputPath>bin\$(Configuration)\</OutputPath>
@@ -36,7 +37,9 @@
     <Compile Include="Measurement.cs" />
     <Compile Include="Basket.cs" />
     <Compile Include="CrabVision.cs" />
+    <Compile Include="DashboardControls.cs" />
     <None Include="README.md" />
+    <None Include="app.manifest" />
     <Content Include="vendor\SensorDll.dll" Condition="Exists('vendor\SensorDll.dll')">
       <Link>SensorDll.dll</Link>
       <TargetPath>SensorDll.dll</TargetPath>
