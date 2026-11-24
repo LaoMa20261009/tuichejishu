@@ -91,7 +91,16 @@ namespace CrabWeighing
         string unit;
         string colors;
         bool recorded;
-        public bool HasRecorded { get { return recorded; } }
+        double recordedWeight;
+        string recordedUnit;
+        string recordedColors;
+        public bool IsHolding(WeightSample weight, double tolerance, bool allowLoadChanges, string detected, bool allowColorChanges)
+        {
+            double changeLimit = Math.Max(2 * tolerance, 2 * Math.Pow(10, -weight.Digits));
+            return recorded && (!allowColorChanges || string.IsNullOrEmpty(detected) || recordedColors == detected) &&
+                (!allowLoadChanges ||
+                (recordedUnit == weight.Unit && Math.Abs(weight.Value - recordedWeight) <= changeLimit));
+        }
 
         public void ResetCandidate()
         {
@@ -101,14 +110,23 @@ namespace CrabWeighing
             samples = 0;
         }
 
-        public void MarkRecorded()
+        public void StartBatch()
+        {
+            recorded = false;
+            ResetCandidate();
+        }
+
+        public void MarkRecorded(WeightSample weight, string detected)
         {
             recorded = true;
+            recordedWeight = weight.Value;
+            recordedUnit = weight.Unit;
+            recordedColors = detected;
             ResetCandidate();
         }
 
         public bool Observe(long now, WeightSample weight, double emptyLimit, double tolerance,
-            string detected, long frameTick, bool auto)
+            string detected, long frameTick, bool auto, bool allowLoadChanges, bool allowColorChanges)
         {
             if (weight == null || !weight.Valid || !weight.Stable)
             {
@@ -125,7 +143,7 @@ namespace CrabWeighing
             }
 
             emptyTick = 0;
-            if (recorded || !auto || weight.Value <= emptyLimit || string.IsNullOrEmpty(detected))
+            if (IsHolding(weight, tolerance, allowLoadChanges, detected, allowColorChanges) || !auto || weight.Value <= emptyLimit || string.IsNullOrEmpty(detected))
             {
                 candidateTick = 0;
                 return false;
@@ -164,18 +182,19 @@ namespace CrabWeighing
 
     sealed class MeasurementRecord
     {
-        public readonly string Time, Colors, Weight, Unit, Source;
+        public readonly string Time, Colors, Weight, Unit, Source, Position;
 
-        public MeasurementRecord(string time, string colors, string weight, string unit, string source)
+        public MeasurementRecord(string time, string colors, string weight, string unit, string source, string position = "")
         {
             Time = time;
             Colors = colors;
             Weight = weight;
             Unit = unit;
             Source = source;
+            Position = position;
         }
 
-        public string[] Fields { get { return new[] { Time, Colors, Weight, Unit, Source }; } }
+        public string[] Fields { get { return new[] { Time, Colors, Weight, Unit, Source, Position }; } }
     }
 
     sealed class History
@@ -192,10 +211,10 @@ namespace CrabWeighing
                 string[] fields = line.Split('\t');
                 DateTimeOffset time;
                 double weight;
-                if (fields.Length == 5 &&
+                if ((fields.Length == 5 || fields.Length == 6) &&
                     DateTimeOffset.TryParseExact(fields[0], "o", CultureInfo.InvariantCulture, DateTimeStyles.None, out time) &&
                     double.TryParse(fields[2], NumberStyles.Float, CultureInfo.InvariantCulture, out weight))
-                    yield return new MeasurementRecord(fields[0], fields[1], fields[2], fields[3], fields[4]);
+                    yield return new MeasurementRecord(fields[0], fields[1], fields[2], fields[3], fields[4], fields.Length == 6 ? fields[5] : "");
             }
         }
 

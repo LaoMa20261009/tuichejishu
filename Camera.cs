@@ -20,7 +20,13 @@ namespace CrabWeighing
         public readonly byte[] Pixels;
         public readonly long Tick = Stopwatch.GetTimestamp();
 
-        public VideoFrame(byte[] pixels) { Pixels = pixels; }
+        public readonly TimeSpan? Position;
+
+        public VideoFrame(byte[] pixels, TimeSpan? position = null)
+        {
+            Pixels = pixels;
+            Position = position;
+        }
 
         public Bitmap ToBitmap()
         {
@@ -37,17 +43,24 @@ namespace CrabWeighing
     {
         readonly object processLock = new object();
         readonly CancellationTokenSource cancellation = new CancellationTokenSource();
+        readonly LocalVideo localVideo;
         Process process;
         VideoFrame latest;
         volatile string error;
         public readonly CameraSource Source;
 
-        public CameraSession(CameraSource source, string address, string executable, Func<bool> demoLoaded)
+        public CameraSession(CameraSource source, string address, string executable, Func<int> demoCount)
         {
             Source = source;
+            if (source == CameraSource.File)
+            {
+                localVideo = new LocalVideo(address);
+                cancellation.Dispose();
+                return;
+            }
             if (source == CameraSource.Demo)
             {
-                Task.Factory.StartNew(() => GenerateDemo(demoLoaded), TaskCreationOptions.LongRunning);
+                Task.Factory.StartNew(() => GenerateDemo(demoCount), TaskCreationOptions.LongRunning);
                 return;
             }
 
@@ -68,13 +81,6 @@ namespace CrabWeighing
                 options = "-f dshow ";
                 address = "video=" + address;
             }
-            else
-            {
-                if (!File.Exists(address)) throw new FileNotFoundException("找不到本地视频文件。");
-                options = "-re -stream_loop -1 ";
-                address = Path.GetFullPath(address);
-            }
-
             string arguments = "-hide_banner -loglevel error -nostdin " + options + "-i " + Quote(address) +
                 " -map 0:v:0 -an -sn -vf fps=10,scale=640:360:force_original_aspect_ratio=decrease," +
                 "pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1 -threads 1 -pix_fmt bgr24 -f rawvideo pipe:1";
@@ -93,8 +99,9 @@ namespace CrabWeighing
             Task.Factory.StartNew(() => ReadFrames(child), TaskCreationOptions.LongRunning);
         }
 
-        public VideoFrame Latest { get { return Volatile.Read(ref latest); } }
-        public string Error { get { return error; } }
+        public VideoFrame Latest { get { return localVideo == null ? Volatile.Read(ref latest) : localVideo.Latest; } }
+        public string Error { get { return localVideo == null ? error : localVideo.Error; } }
+        public bool Ended { get { return localVideo != null && localVideo.Ended; } }
 
         void ReadFrames(Process child)
         {
@@ -134,7 +141,7 @@ namespace CrabWeighing
             }
         }
 
-        void GenerateDemo(Func<bool> loaded)
+        void GenerateDemo(Func<int> getCount)
         {
             try
             {
@@ -148,13 +155,14 @@ namespace CrabWeighing
                             graphics.Clear(Color.FromArgb(25, 43, 49));
                             graphics.FillRectangle(Brushes.SteelBlue, 125, 55, 390, 250);
                             graphics.FillRectangle(Brushes.DarkSlateGray, 143, 72, 354, 216);
-                            if (loaded())
+                            int count = getCount();
+                            if (count > 0)
                             {
                                 using (var shell = new SolidBrush(Color.FromArgb(90, 75, 59)))
                                 using (var red = new Pen(Color.Firebrick, 5))
                                 using (var white = new Pen(Color.Ivory, 5))
                                 {
-                                    for (int i = 0; i < 6; i++)
+                                    for (int i = 0; i < Math.Min(count, 6); i++)
                                     {
                                         int x = 158 + i % 3 * 108, y = 87 + i / 3 * 94;
                                         graphics.FillEllipse(shell, x, y, 96, 72);
@@ -200,6 +208,11 @@ namespace CrabWeighing
 
         public void Dispose()
         {
+            if (localVideo != null)
+            {
+                localVideo.Dispose();
+                return;
+            }
             try { cancellation.Cancel(); }
             catch (ObjectDisposedException) { }
             lock (processLock)

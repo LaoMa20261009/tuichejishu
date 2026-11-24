@@ -22,12 +22,16 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="WindowsBase" />
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Compile Include="Program.cs" />
     <Compile Include="MainForm.cs" />
     <Compile Include="Camera.cs" />
+    <Compile Include="LocalVideo.cs" />
+    <Compile Include="SimulatedScale.cs" />
     <Compile Include="Scale.cs" />
     <Compile Include="Measurement.cs" />
     <None Include="README.md" />
