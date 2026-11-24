@@ -15,8 +15,8 @@ namespace CrabWeighing
         static readonly Color Blue = Color.FromArgb(30, 91, 183);
         static readonly Color PaleBlue = Color.FromArgb(232, 241, 255);
         static readonly Color Muted = Color.FromArgb(74, 94, 121);
-        static readonly Color[] RopeInk = { Color.FromArgb(172, 40, 56), Color.FromArgb(25, 113, 79), Color.FromArgb(32, 81, 172) };
-        static readonly Color[] RopeFill = { Color.FromArgb(254, 234, 237), Color.FromArgb(227, 247, 238), PaleBlue };
+        static readonly Color[] RopeInk = { Color.FromArgb(172, 40, 56), Color.FromArgb(25, 113, 79), Color.FromArgb(32, 81, 172), Color.FromArgb(78, 90, 107) };
+        static readonly Color[] RopeFill = { Color.FromArgb(254, 234, 237), Color.FromArgb(227, 247, 238), PaleBlue, Color.FromArgb(233, 238, 246) };
         static readonly int[] DemoCounts = { 0, 1, 2, 4, 3 };
 
         readonly PictureBox preview = new PictureBox();
@@ -28,9 +28,9 @@ namespace CrabWeighing
         readonly Label cameraStatus = Note("视频未连接");
         readonly Label ropeStatus = Note("等待视频画面");
         readonly NumericUpDown[] references = { Amount(200, 1, 10, 10000, 1),
-            Amount(250, 1, 10, 10000, 1), Amount(300, 1, 10, 10000, 1) };
-        readonly Label[] countCells = { Note("—"), Note("—"), Note("—") };
-        readonly Label[] massCells = { Note("—"), Note("—"), Note("—") };
+            Amount(250, 1, 10, 10000, 1), Amount(300, 1, 10, 10000, 1), Amount(0, 1, 0, 10000, 1) };
+        readonly Label[] countCells = { Note("—"), Note("—"), Note("—"), Note("—") };
+        readonly Label[] massCells = { Note("—"), Note("—"), Note("—"), Note("—") };
         readonly Button confirmCounts = ActionButton("核对数量");
         WeightSample currentWeight;
         bool confirmingCounts;
@@ -66,7 +66,9 @@ namespace CrabWeighing
         Rectangle area = new Rectangle(0, 0, VideoFrame.Width, VideoFrame.Height);
         Point? selectionStart;
         Rectangle selecting;
-        string colors = "";
+        CrabObservation latestObservation;
+        CrabObservation stableObservation;
+        int matchingFrames;
         bool simulationOpen;
         volatile int simulationCount;
         int demoStep;
@@ -84,46 +86,54 @@ namespace CrabWeighing
         public MainForm()
         {
             Text = "螃蟹称重与绳色识别";
+            AutoSize = false;
+            AutoScaleMode = AutoScaleMode.None;
             ClientSize = new Size(1232, 716);
             MinimumSize = new Size(1050, 680);
             WindowState = FormWindowState.Maximized;
-            AutoScaleMode = AutoScaleMode.Dpi;
             StartPosition = FormStartPosition.CenterScreen;
-            Font = new Font("Microsoft YaHei UI", 9F);
+            Font = new Font("Microsoft YaHei UI", 11F);
             BackColor = Color.FromArgb(236, 242, 249);
             ForeColor = Ink;
             cameraType.SelectedIndex = (int)CameraSource.File;
             cameraType.Width = 112;
-            address.Width = 245;
+            address.Width = 225;
+            cameraButton.AutoSize = false;
+            cameraButton.Width = 102;
+            hints.SetToolTip(references[3], "白绳可计数。与其他绳色混装时，填写白绳单只参考重量才能分配净重。");
             cameraButton.BackColor = scaleButton.BackColor = Blue;
             cameraButton.ForeColor = scaleButton.ForeColor = Color.White;
 
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18, 14, 18, 14), RowCount = 3, ColumnCount = 1 };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 55));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 70));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 30));
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14, 10, 14, 10), RowCount = 2, ColumnCount = 2 };
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
             Controls.Add(root);
-            var top = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
-            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 61));
-            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 39));
-            top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            var banner = new Panel { Dock = DockStyle.Fill, BackColor = Ink, Margin = new Padding(5, 0, 5, 8) };
+            var banner = new Panel { Dock = DockStyle.Fill, BackColor = Ink, Margin = new Padding(6, 0, 6, 6) };
             var title = Heading("螃蟹称重与绳色识别");
             title.Font = new Font(Font.FontFamily, 17, FontStyle.Bold);
             title.Location = new Point(16, 8);
             title.ForeColor = Color.White;
             banner.Controls.Add(title);
             root.Controls.Add(banner, 0, 0);
-            root.Controls.Add(top, 0, 1);
-            top.Controls.Add(CreateVideoPanel(), 0, 0);
+            root.SetColumnSpan(banner, 2);
+
+            var left = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = Padding.Empty };
+            left.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            left.RowStyles.Add(new RowStyle(SizeType.Percent, 69));
+            left.RowStyles.Add(new RowStyle(SizeType.Percent, 31));
+            left.Controls.Add(CreateVideoPanel(), 0, 0);
+            left.Controls.Add(CreateRecordsPanel(), 0, 1);
+            root.Controls.Add(left, 0, 1);
+
             var right = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = Padding.Empty };
-            right.RowStyles.Add(new RowStyle(SizeType.Percent, 53));
-            right.RowStyles.Add(new RowStyle(SizeType.Percent, 47));
+            right.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            right.RowStyles.Add(new RowStyle(SizeType.Percent, 43));
+            right.RowStyles.Add(new RowStyle(SizeType.Percent, 57));
             right.Controls.Add(CreateScalePanel(), 0, 0);
             right.Controls.Add(CreateBasketPanel(), 0, 1);
-            top.Controls.Add(right, 1, 0);
-            root.Controls.Add(CreateRecordsPanel(), 0, 2);
+            root.Controls.Add(right, 1, 1);
 
             cameraButton.Click += (s, e) => ToggleCamera();
             browseVideo.Click += (s, e) => SelectVideoFile();
@@ -180,10 +190,12 @@ namespace CrabWeighing
         Control CreateVideoPanel()
         {
             var panel = Card(6);
-            for (int i = 0; i < 3; i++) panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
             var reset = ActionButton("全画面");
             reset.Click += (s, e) =>
             {
@@ -196,6 +208,7 @@ namespace CrabWeighing
             decoderControls = Line(Note("相机解码器"), ffmpeg);
             panel.Controls.Add(decoderControls, 0, 2);
             hints.SetToolTip(ffmpeg, "可填写 ffmpeg.exe 的完整路径，或将它加入 PATH。");
+            preview.AutoSize = false;
             preview.Dock = DockStyle.Fill;
             preview.Margin = new Padding(0, 6, 0, 6);
             preview.BackColor = Color.FromArgb(12, 24, 41);
@@ -206,9 +219,10 @@ namespace CrabWeighing
             StyleStatus(ropeStatus);
             coverage.Width = 62;
             panel.Controls.Add(Line(Heading("绳色识别"), ropeStatus, Note("覆盖率 %"), coverage,
-                Note("拖动视频框选识别区")), 0, 4);
-            var rules = Line(Heading("单只参考重量"), ColorLabel(0), references[0], ColorLabel(1), references[1],
-                ColorLabel(2), references[2], Note("克"));
+                Note("拖动框选筐内区域")), 0, 4);
+            foreach (NumericUpDown reference in references) reference.Width = 67;
+            var rules = Line(Heading("参考重量（克）"), ColorLabel(0), references[0], ColorLabel(1), references[1],
+                ColorLabel(2), references[2], ColorLabel(3), references[3]);
             rules.BackColor = Color.FromArgb(244, 247, 252);
             rules.Padding = new Padding(6, 4, 6, 4);
             panel.Controls.Add(rules, 0, 5);
@@ -251,9 +265,9 @@ namespace CrabWeighing
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             panel.Controls.Add(Line(Heading("筐内螃蟹"), confirmCounts), 0, 0);
-            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 4, ColumnCount = 3, Margin = new Padding(0, 4, 0, 4) };
+            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 3, Margin = new Padding(0, 4, 0, 4) };
             for (int i = 0; i < 3; i++) grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F / 3));
-            for (int i = 0; i < 4; i++) grid.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
+            for (int i = 0; i < 5; i++) grid.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
             grid.BackColor = Color.FromArgb(244, 247, 252);
             grid.Controls.Add(Note("绳色"), 0, 0);
             grid.Controls.Add(Note("数量 / 只"), 1, 0);
@@ -294,7 +308,7 @@ namespace CrabWeighing
                 }
                 catch (Exception ex) { MessageBox.Show(this, ex.Message, "打开记录目录失败"); }
             };
-            panel.Controls.Add(Line(Heading("测量历史"), folder), 0, 0);
+            panel.Controls.Add(Line(Heading("识别历史记录"), folder), 0, 0);
             records.Dock = DockStyle.Fill;
             records.ReadOnly = true;
             records.AllowUserToAddRows = false;
@@ -322,9 +336,10 @@ namespace CrabWeighing
             records.Columns.Add("count", "数量");
             records.Columns.Add("weight", "净重（克）");
             records.Columns.Add("source", "来源");
-            records.Columns[0].FillWeight = 156;
-            records.Columns[1].FillWeight = 130;
-            records.Columns[2].FillWeight = 65;
+            records.Columns[0].FillWeight = 158;
+            records.Columns[1].FillWeight = 70;
+            records.Columns[2].FillWeight = 52;
+            records.Columns[4].FillWeight = 150;
             foreach (DataGridViewColumn column in records.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
             panel.Controls.Add(records, 0, 1);
             return panel;
@@ -392,7 +407,7 @@ namespace CrabWeighing
             ReplaceImage(null);
             InvalidateAnalysis();
             cameraStatus.Text = status;
-            ropeStatus.Text = "绳色  —";
+            ropeStatus.Text = "等待视频画面";
             cameraButton.Text = "连接视频";
             UpdateCameraInputs();
         }
@@ -407,6 +422,7 @@ namespace CrabWeighing
             // Mask stream addresses in the UI because RTSP URLs may contain credentials.
             address.UseSystemPasswordChar = source == CameraSource.Network;
             decoderControls.Visible = source == CameraSource.Network || source == CameraSource.Usb;
+            ((TableLayoutPanel)decoderControls.Parent).RowStyles[2].Height = decoderControls.Visible ? 39 : 0;
             ffmpeg.Enabled = camera == null;
             hints.SetToolTip(address, source == CameraSource.Usb ? "DirectShow 设备名称" :
                 source == CameraSource.File ? "本地视频的完整路径" : "RTSP 或 HTTP 视频流地址");
@@ -488,6 +504,7 @@ namespace CrabWeighing
                 currentWeight = weight;
                 now = Stopwatch.GetTimestamp();
                 long frameTick = RefreshVideo(now);
+                RefreshBasket(weight);
                 RefreshRecording(now, weight, frameTick);
             }
             finally { refreshing = false; }
@@ -569,7 +586,7 @@ namespace CrabWeighing
                     InvalidateAnalysis();
                 }
                 cameraStatus.Text = CaptureGate.Elapsed(now, cameraStarted) > 8 ? "未收到新画面，请检查视频源" : "等待首帧";
-                ropeStatus.Text = "绳色  —";
+                ropeStatus.Text = "等待视频画面";
                 return 0;
             }
             if (displayed != frame)
@@ -583,10 +600,17 @@ namespace CrabWeighing
             {
                 analyzed = frame;
                 lastAnalysis = now;
-                colors = RopeColor.Detect(frame, area, (double)coverage.Value);
-                ropeStatus.Text = colors.Length == 0 ? "未识别到绳色" : colors;
+                var observation = CrabVision.Read(frame, area, (double)coverage.Value);
+                matchingFrames = latestObservation != null && latestObservation.Signature == observation.Signature
+                    ? matchingFrames + 1 : 1;
+                latestObservation = observation;
+                if (matchingFrames >= 2) stableObservation = observation;
+                int total = stableObservation == null ? 0 : stableObservation.Targets.Length;
+                ropeStatus.Text = stableObservation == null ? "识别中" : total == 0 ? "未找到系绳目标" :
+                    total + " 只 · " + string.Join("、", Basket.Colors.Where((color, index) => stableObservation.Counts[index] > 0));
+                preview.Invalidate();
             }
-            return analyzed == null ? 0 : analyzed.Tick;
+            return analyzed == null || matchingFrames < 2 ? 0 : analyzed.Tick;
         }
 
         double[] ReferenceGrams()
@@ -630,6 +654,25 @@ namespace CrabWeighing
             }
         }
 
+        bool CanAllocate(int[] counts)
+        {
+            return counts.Count(count => count > 0) <= 1 ||
+                !references.Where((reference, index) => counts[index] > 0).Any(reference => reference.Value <= 0);
+        }
+
+        void RefreshBasket(WeightSample weight)
+        {
+            int[] counts = stableObservation == null ? null : stableObservation.Counts;
+            bool validWeight = weight != null && weight.Valid && weight.Stable && weight.Value > (double)emptyLimit.Value;
+            double[] grams = counts != null && counts.Sum() > 0 && validWeight && CanAllocate(counts)
+                ? Basket.Allocate(weight.Value, counts, ReferenceGrams()) : null;
+            for (int i = 0; i < countCells.Length; i++)
+            {
+                countCells[i].Text = counts == null ? "—" : counts[i].ToString(CultureInfo.InvariantCulture);
+                massCells[i].Text = grams == null ? "—" : grams[i].ToString("F1", CultureInfo.InvariantCulture);
+            }
+        }
+
         void RefreshRecording(long now, WeightSample weight, long frameTick)
         {
             bool stable = weight != null && weight.Valid && weight.Stable;
@@ -641,39 +684,26 @@ namespace CrabWeighing
             bool sourceMatches = hasFrame && (local || simulationOpen == (camera.Source == CameraSource.Demo));
             double stability = (double)tolerance.Value;
             CaptureGate gate = simulationOpen ? demoGate : liveGate;
-            if (stable && Math.Abs(weight.Value) <= empty)
-            {
-                ClearBasket();
-                for (int i = 0; i < countCells.Length; i++)
-                {
-                    countCells[i].Text = "0";
-                    massCells[i].Text = "0.0";
-                }
-            }
-            if (gate.Observe(now, weight, empty, stability, sourceMatches ? colors : "", frameTick,
+            int[] counts = stableObservation == null ? null : stableObservation.Counts;
+            bool detected = counts != null && counts.Sum() > 0;
+            string signature = sourceMatches && detected ? stableObservation.Signature : "";
+            bool allocatable = detected && CanAllocate(counts);
+            if (gate.Observe(now, weight, empty, stability, allocatable ? signature : "", frameTick,
                 automatic.Checked, true, true) && CaptureGate.Elapsed(now, lastWriteAttempt) >= 1)
             {
                 lastWriteAttempt = now;
-                string[] detected = colors.Split('、');
-                var inferred = detected.All(color => Array.IndexOf(Basket.Colors, color) >= 0)
-                    ? Basket.Infer(weight.Value, colors, ReferenceGrams()) : null;
-                if (inferred == null)
-                {
-                    ClearBasket();
-                    basketState = "分色数量待核对";
-                }
-                else SaveBasket(gate, weight, colors, inferred, false);
+                SaveBasket(gate, weight, signature, counts, false);
             }
 
-            if (!stable) captureStatus.Text = "等待稳定净重";
-            else if (Math.Abs(weight.Value) <= empty) captureStatus.Text = "空秤";
-            else if (writeFailed) captureStatus.Text = "历史写入失败";
-            else if (!automatic.Checked) captureStatus.Text = basketState.Length == 0 ? "自动记录已暂停" : basketState;
-            else if (gate.IsHolding(weight, stability, true, colors, true)) captureStatus.Text = basketState;
-            else if (!hasFrame) captureStatus.Text = basketState.Length == 0 ? "等待视频画面" : basketState;
+            if (!automatic.Checked) captureStatus.Text = "自动记录已暂停";
+            else if (!hasFrame) captureStatus.Text = camera != null && camera.Ended ? "视频已播完" : "等待稳定画面";
+            else if (!detected) captureStatus.Text = "等待识别到系绳目标";
+            else if (!stable || weight.Value <= empty) captureStatus.Text = "数量已更新 · 等待稳定净重";
             else if (!sourceMatches) captureStatus.Text = "演示画面请搭配模拟秤";
-            else if (colors.Length == 0) captureStatus.Text = "等待识别绳色";
-            else captureStatus.Text = basketState == "分色数量待核对" ? basketState : "确认绳色与净重中";
+            else if (!allocatable) captureStatus.Text = "混装记录需填写白绳参考重量";
+            else if (writeFailed) captureStatus.Text = "历史写入失败";
+            else if (gate.IsHolding(weight, stability, true, signature, true)) captureStatus.Text = basketState;
+            else captureStatus.Text = "准备保存识别记录";
         }
 
         void SaveBasket(CaptureGate gate, WeightSample weight, string detected, int[] counts, bool manual)
@@ -682,7 +712,7 @@ namespace CrabWeighing
             bool mixed = counts.Count(count => count > 0) > 1;
             string time = DateTimeOffset.Now.ToString("o", CultureInfo.InvariantCulture);
             string source = (camera != null && camera.Source == CameraSource.File ? "本地视频 · " : "") +
-                (simulationOpen ? "模拟秤" : "实秤") + (manual ? " · 人工核对" : " · 数量推算");
+                (simulationOpen ? "模拟秤" : "实秤") + (manual ? " · 人工核对" : " · 视频识别");
             if (mixed) source += " · 重量估算";
             var rows = new System.Collections.Generic.List<MeasurementRecord>();
             for (int i = 0; i < counts.Length; i++)
@@ -693,11 +723,6 @@ namespace CrabWeighing
             catch (UnauthorizedAccessException) { writeFailed = true; return; }
             writeFailed = false;
             gate.MarkRecorded(weight, detected);
-            for (int i = 0; i < counts.Length; i++)
-            {
-                countCells[i].Text = counts[i].ToString(CultureInfo.InvariantCulture);
-                massCells[i].Text = grams[i].ToString("F1", CultureInfo.InvariantCulture);
-            }
             basketState = mixed ? "已记录 · 分色重量为估算" : "已记录";
             captureStatus.Text = basketState;
             foreach (MeasurementRecord row in rows) AddRow(row);
@@ -707,7 +732,8 @@ namespace CrabWeighing
         {
             var initial = currentWeight;
             if (initial == null || !initial.Valid || !initial.Stable || initial.Value <= (double)emptyLimit.Value) return;
-            var inputs = Basket.Colors.Select(color => Amount(0, 0, 0, Basket.MaximumCount, 1)).ToArray();
+            var inputs = Basket.Colors.Select((color, index) => Amount(stableObservation == null ? 0 :
+                Math.Min(Basket.MaximumCount, stableObservation.Counts[index]), 0, 0, Basket.MaximumCount, 1)).ToArray();
             confirmingCounts = true;
             try
             {
@@ -741,7 +767,13 @@ namespace CrabWeighing
                             form.Close();
                             return;
                         }
-                        SaveBasket(simulationOpen ? demoGate : liveGate, sample, colors, counts, true);
+                        if (!CanAllocate(counts))
+                        {
+                            MessageBox.Show(form, "混装记录需填写白绳参考重量。");
+                            return;
+                        }
+                        SaveBasket(simulationOpen ? demoGate : liveGate, sample,
+                            stableObservation == null ? "" : stableObservation.Signature, counts, true);
                         if (writeFailed) MessageBox.Show(form, "写入历史失败，请检查记录目录权限。");
                         else form.DialogResult = DialogResult.OK;
                     };
@@ -822,15 +854,30 @@ namespace CrabWeighing
         void DrawArea(object sender, PaintEventArgs e)
         {
             if (displayed == null) return;
+            Rectangle bounds = VideoBounds();
+            if (!selectionStart.HasValue && latestObservation != null)
+            {
+                foreach (CrabTarget target in latestObservation.Targets)
+                {
+                    using (var pen = new Pen(RopeInk[target.ColorIndex], 2))
+                    {
+                        Rectangle screen = OnPreview(target.Bounds, bounds);
+                        e.Graphics.DrawRectangle(pen, screen);
+                        TextRenderer.DrawText(e.Graphics, Basket.Colors[target.ColorIndex], Font,
+                            new Point(screen.Left, Math.Max(0, screen.Top - Font.Height)), Color.White, RopeInk[target.ColorIndex]);
+                    }
+                }
+            }
             Rectangle box = selectionStart.HasValue ? selecting : area;
             if (box.IsEmpty || box.Size == new Size(VideoFrame.Width, VideoFrame.Height)) return;
-            Rectangle bounds = VideoBounds();
-            using (var pen = new Pen(Color.Aquamarine, 2))
-            {
-                e.Graphics.DrawRectangle(pen, bounds.X + box.X * bounds.Width / VideoFrame.Width,
-                    bounds.Y + box.Y * bounds.Height / VideoFrame.Height, box.Width * bounds.Width / VideoFrame.Width,
-                    box.Height * bounds.Height / VideoFrame.Height);
-            }
+            using (var pen = new Pen(Color.Aquamarine, 2)) e.Graphics.DrawRectangle(pen, OnPreview(box, bounds));
+        }
+
+        static Rectangle OnPreview(Rectangle box, Rectangle bounds)
+        {
+            return new Rectangle(bounds.X + box.X * bounds.Width / VideoFrame.Width,
+                bounds.Y + box.Y * bounds.Height / VideoFrame.Height, box.Width * bounds.Width / VideoFrame.Width,
+                box.Height * bounds.Height / VideoFrame.Height);
         }
 
         void ResetCandidates()
@@ -842,7 +889,11 @@ namespace CrabWeighing
         void InvalidateAnalysis()
         {
             analyzed = null;
-            colors = "";
+            latestObservation = null;
+            stableObservation = null;
+            matchingFrames = 0;
+            ropeStatus.Text = "等待视频画面";
+            preview.Invalidate();
             ResetCandidates();
         }
 
@@ -867,7 +918,7 @@ namespace CrabWeighing
         static TableLayoutPanel Card(int rows)
         {
             var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = rows,
-                Padding = new Padding(15, 10, 15, 10), Margin = new Padding(5), BackColor = Color.White };
+                Padding = new Padding(14, 9, 14, 9), Margin = new Padding(6), BackColor = Color.White };
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             return panel;
         }
@@ -875,7 +926,7 @@ namespace CrabWeighing
         static FlowLayoutPanel Line(params Control[] controls)
         {
             var row = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Fill, WrapContents = true, Margin = Padding.Empty };
+                Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
             row.Controls.AddRange(controls);
             return row;
         }
@@ -904,7 +955,7 @@ namespace CrabWeighing
         {
             var button = new Button { Text = text, AutoSize = true, Height = 32,
                 Padding = new Padding(8, 0, 8, 0), BackColor = PaleBlue, ForeColor = Blue,
-                FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false, Cursor = Cursors.Hand };
+                FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false, Cursor = Cursors.Hand, Margin = new Padding(4) };
             button.FlatAppearance.BorderSize = 0;
             return button;
         }

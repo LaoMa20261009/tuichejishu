@@ -15,7 +15,7 @@ namespace CrabWeighing
             long now = Stopwatch.GetTimestamp();
             previous = Interpolate(now);
             target = 0;
-            for (int i = 0; i < count; i++) target += reference[i % reference.Length];
+            for (int i = 0; i < count; i++) target += reference[i % 3];
             changedAt = now;
         }
 
