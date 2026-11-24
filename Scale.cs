@@ -9,15 +9,16 @@ namespace CrabWeighing
     sealed class WeightSample
     {
         public readonly DateTimeOffset Time = DateTimeOffset.Now;
-        public readonly long Tick = Stopwatch.GetTimestamp();
+        public readonly long Tick;
         public readonly double Value;
         public readonly string Unit;
         public readonly bool Stable;
         public readonly bool Valid;
         public readonly int Digits;
 
-        public WeightSample(double value, string unit, bool stable, bool valid, int digits)
+        public WeightSample(double value, string unit, bool stable, bool valid, int digits, long? tick = null)
         {
+            Tick = tick ?? Stopwatch.GetTimestamp();
             Value = value;
             Unit = unit;
             Stable = stable;

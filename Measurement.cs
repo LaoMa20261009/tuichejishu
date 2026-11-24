@@ -182,19 +182,18 @@ namespace CrabWeighing
 
     sealed class MeasurementRecord
     {
-        public readonly string Time, Colors, Weight, Unit, Source, Position;
+        public readonly string Time, Color, Source;
+        public readonly double Grams;
+        public readonly int? Count;
 
-        public MeasurementRecord(string time, string colors, string weight, string unit, string source, string position = "")
+        public MeasurementRecord(string time, string color, double grams, int? count, string source)
         {
             Time = time;
-            Colors = colors;
-            Weight = weight;
-            Unit = unit;
+            Color = color;
+            Grams = grams;
+            Count = count;
             Source = source;
-            Position = position;
         }
-
-        public string[] Fields { get { return new[] { Time, Colors, Weight, Unit, Source, Position }; } }
     }
 
     sealed class History
@@ -205,29 +204,60 @@ namespace CrabWeighing
 
         public IEnumerable<MeasurementRecord> Load()
         {
+            string legacy = Path.Combine(Path.GetDirectoryName(FilePath), "measurements.tsv");
+            if (File.Exists(legacy))
+            {
+                foreach (string line in File.ReadLines(legacy, Encoding.UTF8))
+                {
+                    string[] fields = line.Split('	');
+                    double weight, grams;
+                    if (fields.Length >= 5 && ValidRow(fields, out weight) &&
+                        Basket.TryGrams(weight, fields[3], out grams))
+                        yield return new MeasurementRecord(fields[0], fields[1], grams, null, fields[4]);
+                }
+            }
             if (!File.Exists(FilePath)) yield break;
             foreach (string line in File.ReadLines(FilePath, Encoding.UTF8))
             {
-                string[] fields = line.Split('\t');
-                DateTimeOffset time;
-                double weight;
-                if ((fields.Length == 5 || fields.Length == 6) &&
-                    DateTimeOffset.TryParseExact(fields[0], "o", CultureInfo.InvariantCulture, DateTimeStyles.None, out time) &&
-                    double.TryParse(fields[2], NumberStyles.Float, CultureInfo.InvariantCulture, out weight))
-                    yield return new MeasurementRecord(fields[0], fields[1], fields[2], fields[3], fields[4], fields.Length == 6 ? fields[5] : "");
+                string[] fields = line.Split('	');
+                double grams;
+                int count;
+                if (fields.Length == 5 && ValidRow(fields, out grams) &&
+                    int.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out count) && count > 0)
+                    yield return new MeasurementRecord(fields[0], fields[1], grams, count, fields[4]);
             }
         }
 
-        public void Append(MeasurementRecord record)
+        static bool ValidRow(string[] fields, out double weight)
+        {
+            DateTimeOffset time;
+            return double.TryParse(fields[2], NumberStyles.Float, CultureInfo.InvariantCulture, out weight) &&
+                !double.IsNaN(weight) && !double.IsInfinity(weight) && fields[1].Length > 0 &&
+                fields[1].IndexOf('、') < 0 &&
+                DateTimeOffset.TryParseExact(fields[0], "o", CultureInfo.InvariantCulture, DateTimeStyles.None, out time);
+        }
+
+        public void Append(IEnumerable<MeasurementRecord> records)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
-            string line = string.Join("\t", record.Fields.Select(field =>
-                field.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ')));
-            using (var file = new FileStream(FilePath, FileMode.Append, FileAccess.Write, FileShare.Read))
+            var lines = records.Select(record => string.Join("\t", record.Time, record.Color,
+                record.Grams.ToString("F1", CultureInfo.InvariantCulture),
+                record.Count.Value.ToString(CultureInfo.InvariantCulture), record.Source));
+            byte[] bytes = Encoding.UTF8.GetBytes(string.Join("\r\n", lines) + "\r\n");
+            using (var file = new FileStream(FilePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read))
             {
-                byte[] bytes = Encoding.UTF8.GetBytes(line + "\r\n");
-                file.Write(bytes, 0, bytes.Length);
-                file.Flush(true);
+                long originalSize = file.Length;
+                file.Position = originalSize;
+                try
+                {
+                    file.Write(bytes, 0, bytes.Length);
+                    file.Flush(true);
+                }
+                catch
+                {
+                    file.SetLength(originalSize);
+                    throw;
+                }
             }
         }
     }

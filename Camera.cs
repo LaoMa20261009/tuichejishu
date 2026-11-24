@@ -153,20 +153,21 @@ namespace CrabWeighing
                         using (Graphics graphics = Graphics.FromImage(bitmap))
                         {
                             graphics.Clear(Color.FromArgb(25, 43, 49));
-                            graphics.FillRectangle(Brushes.SteelBlue, 125, 55, 390, 250);
+                            graphics.FillRectangle(Brushes.DimGray, 125, 55, 390, 250);
                             graphics.FillRectangle(Brushes.DarkSlateGray, 143, 72, 354, 216);
                             int count = getCount();
                             if (count > 0)
                             {
                                 using (var shell = new SolidBrush(Color.FromArgb(90, 75, 59)))
                                 using (var red = new Pen(Color.Firebrick, 5))
-                                using (var white = new Pen(Color.Ivory, 5))
+                                using (var green = new Pen(Color.LimeGreen, 5))
+                                using (var blue = new Pen(Color.RoyalBlue, 5))
                                 {
                                     for (int i = 0; i < Math.Min(count, 6); i++)
                                     {
                                         int x = 158 + i % 3 * 108, y = 87 + i / 3 * 94;
                                         graphics.FillEllipse(shell, x, y, 96, 72);
-                                        graphics.DrawEllipse(i % 2 == 0 ? white : red, x + 13, y + 10, 65, 47);
+                                        graphics.DrawEllipse(i % 3 == 0 ? red : i % 3 == 1 ? green : blue, x + 13, y + 10, 65, 47);
                                     }
                                 }
                             }
