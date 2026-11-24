@@ -15,6 +15,7 @@ namespace CrabWeighing
         readonly ComboBox cameraType = Choice("网络视频", "USB 摄像头", "本地视频", "演示画面");
         readonly TextBox address = new TextBox { Width = 290 };
         readonly TextBox ffmpeg = new TextBox { Width = 112, Text = "ffmpeg.exe" };
+        readonly Button browseVideo = ActionButton("选择视频");
         readonly Button cameraButton = ActionButton("连接视频");
         readonly Label cameraStatus = Note("视频未连接");
         readonly Label ropeStatus = Note("绳色  —");
@@ -81,6 +82,7 @@ namespace CrabWeighing
             root.Controls.Add(CreateRecordsPanel(), 0, 1);
 
             cameraButton.Click += (s, e) => ToggleCamera();
+            browseVideo.Click += (s, e) => SelectVideoFile();
             scaleButton.Click += (s, e) => ToggleScale();
             cameraType.SelectedIndexChanged += (s, e) =>
             {
@@ -120,7 +122,7 @@ namespace CrabWeighing
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             panel.Controls.Add(Heading("实时视频"), 0, 0);
-            panel.Controls.Add(Line(cameraType, address, cameraButton), 0, 1);
+            panel.Controls.Add(Line(cameraType, address, browseVideo, cameraButton), 0, 1);
             var reset = ActionButton("全画面");
             reset.Click += (s, e) =>
             {
@@ -199,6 +201,20 @@ namespace CrabWeighing
             return panel;
         }
 
+        void SelectVideoFile()
+        {
+            using (var dialog = new OpenFileDialog
+            {
+                Title = "选择本地视频",
+                Filter = "常见视频文件|*.mp4;*.mov;*.avi;*.mkv;*.wmv;*.webm;*.m4v;*.mpg;*.mpeg;*.mts;*.m2ts;*.ts|所有文件|*.*",
+                CheckFileExists = true,
+                RestoreDirectory = true
+            })
+            {
+                if (dialog.ShowDialog(this) == DialogResult.OK) address.Text = dialog.FileName;
+            }
+        }
+
         void ToggleCamera()
         {
             if (camera != null)
@@ -240,6 +256,8 @@ namespace CrabWeighing
             CameraSource source = (CameraSource)cameraType.SelectedIndex;
             cameraType.Enabled = camera == null;
             address.Enabled = camera == null && source != CameraSource.Demo;
+            browseVideo.Visible = source == CameraSource.File;
+            browseVideo.Enabled = camera == null;
             // Mask stream addresses in the UI because RTSP URLs may contain credentials.
             address.UseSystemPasswordChar = source == CameraSource.Network;
             ffmpeg.Enabled = camera == null && source != CameraSource.Demo;
