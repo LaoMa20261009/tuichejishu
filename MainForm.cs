@@ -69,7 +69,9 @@ namespace CrabWeighing
             Margin = new Padding(10, 7, 4, 3) };
         FlowLayoutPanel simulationControls;
         FlowLayoutPanel serialControls;
-        Rectangle? consoleBounds;
+        Size? fixedWindowSize;
+        Control dragControl;
+        Point dragOffset;
         readonly SimulatedScale simulatedScale = new SimulatedScale();
         readonly Label weightValue = new WeightReadout { Text = "—" };
         readonly Label scaleStatus = Note("秤未连接");
@@ -112,9 +114,8 @@ namespace CrabWeighing
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
-            consoleBounds = ConsoleLayout.WindowBounds(Screen.FromPoint(Cursor.Position).Bounds);
-            Bounds = consoleBounds.Value;
-            MinimumSize = MaximumSize = consoleBounds.Value.Size;
+            Rectangle openingBounds = ConsoleLayout.WindowBounds(Screen.FromPoint(Cursor.Position).Bounds);
+            ClientSize = ConsoleLayout.DesignSize;
             Font = new Font("Microsoft YaHei UI", 17, FontStyle.Regular, GraphicsUnit.Pixel);
             BackColor = Surface;
             ForeColor = Ink;
@@ -145,6 +146,18 @@ namespace CrabWeighing
             Place(CreateBasketPanel(), 611, 224, 658, 201);
             Place(CreateRecordsPanel(), 611, 435, 658, 354);
             ResumeLayout(true);
+            float factor = openingBounds.Width / (float)ConsoleLayout.DesignSize.Width;
+            if (Math.Abs(factor - 1) > 0.001F)
+            {
+                ScaleContents(this, factor);
+                ledger.ColumnHeadersHeight = (int)Math.Round(28 * factor);
+                ledger.RowTemplate.Height = (int)Math.Round(42 * factor);
+                ScaleGridFont(ledger.ColumnHeadersDefaultCellStyle, factor);
+                ScaleGridFont(ledger.DefaultCellStyle, factor);
+            }
+            Bounds = openingBounds;
+            fixedWindowSize = openingBounds.Size;
+            MinimumSize = MaximumSize = openingBounds.Size;
 
             cameraButton.Click += (s, e) => ToggleCamera();
             browseVideo.Click += (s, e) => SelectInputFile();
@@ -202,13 +215,101 @@ namespace CrabWeighing
 
         protected override void SetBoundsCore(int x, int y, int width, int height, BoundsSpecified specified)
         {
-            if (consoleBounds.HasValue && WindowState == FormWindowState.Normal)
+            if (fixedWindowSize.HasValue && WindowState == FormWindowState.Normal)
             {
-                Rectangle fixedBounds = consoleBounds.Value;
-                base.SetBoundsCore(fixedBounds.X, fixedBounds.Y, fixedBounds.Width, fixedBounds.Height, BoundsSpecified.All);
-                return;
+                width = fixedWindowSize.Value.Width;
+                height = fixedWindowSize.Value.Height;
             }
             base.SetBoundsCore(x, y, width, height, specified);
+        }
+
+        static void ScaleContents(Control root, float factor)
+        {
+            var fonts = new System.Collections.Generic.Dictionary<Control, Font>();
+            var layoutMetrics = new System.Collections.Generic.List<Action>();
+            CollectExplicitFonts(root, fonts);
+            foreach (Control control in root.Controls) CollectLayoutMetrics(control, factor, layoutMetrics);
+            root.SuspendLayout();
+            foreach (Control control in root.Controls) control.Scale(new SizeF(factor, factor));
+            foreach (var item in fonts)
+            {
+                Font font = item.Value;
+                item.Key.Font = new Font(font.FontFamily, font.Size * factor, font.Style, font.Unit);
+            }
+            foreach (Action apply in layoutMetrics) apply();
+            root.ResumeLayout(true);
+        }
+
+        static void CollectExplicitFonts(Control control, System.Collections.Generic.Dictionary<Control, Font> fonts)
+        {
+            var property = System.ComponentModel.TypeDescriptor.GetProperties(control)["Font"];
+            if (property != null && property.ShouldSerializeValue(control)) fonts.Add(control, control.Font);
+            foreach (Control child in control.Controls) CollectExplicitFonts(child, fonts);
+        }
+
+        static void CollectLayoutMetrics(Control control, float factor, System.Collections.Generic.List<Action> settings)
+        {
+            Padding padding = control.Padding, margin = control.Margin;
+            settings.Add(() =>
+            {
+                control.Padding = ScalePadding(padding, factor);
+                control.Margin = ScalePadding(margin, factor);
+            });
+            var table = control as TableLayoutPanel;
+            if (table != null)
+            {
+                foreach (RowStyle row in table.RowStyles)
+                {
+                    if (row.SizeType != SizeType.Absolute) continue;
+                    float height = row.Height;
+                    settings.Add(() => row.Height = height * factor);
+                }
+                foreach (ColumnStyle column in table.ColumnStyles)
+                {
+                    if (column.SizeType != SizeType.Absolute) continue;
+                    float width = column.Width;
+                    settings.Add(() => column.Width = width * factor);
+                }
+            }
+            foreach (Control child in control.Controls) CollectLayoutMetrics(child, factor, settings);
+        }
+
+        static Padding ScalePadding(Padding padding, float factor)
+        {
+            return new Padding((int)Math.Round(padding.Left * factor), (int)Math.Round(padding.Top * factor),
+                (int)Math.Round(padding.Right * factor), (int)Math.Round(padding.Bottom * factor));
+        }
+
+        static void ScaleGridFont(DataGridViewCellStyle style, float factor)
+        {
+            Font font = style.Font;
+            if (font != null) style.Font = new Font(font.FontFamily, font.Size * factor, font.Style, font.Unit);
+        }
+
+        void EnableWindowDrag(Control surface)
+        {
+            surface.MouseDown += (sender, e) =>
+            {
+                if (e.Button != MouseButtons.Left) return;
+                dragControl = surface;
+                dragOffset = surface.PointToScreen(e.Location) - (Size)Location;
+                surface.Capture = true;
+            };
+            surface.MouseMove += (sender, e) =>
+            {
+                if (dragControl != surface || !surface.Capture) return;
+                Point pointer = surface.PointToScreen(e.Location);
+                Rectangle screen = Screen.FromPoint(pointer).Bounds;
+                Location = new Point(pointer.X - dragOffset.X, Math.Max(screen.Top, pointer.Y - dragOffset.Y));
+            };
+            surface.MouseUp += (sender, e) =>
+            {
+                if (e.Button == MouseButtons.Left && dragControl == surface) surface.Capture = false;
+            };
+            surface.MouseCaptureChanged += (sender, e) =>
+            {
+                if (!surface.Capture && dragControl == surface) dragControl = null;
+            };
         }
 
         void Place(Control control, int x, int y, int width, int height)
@@ -250,14 +351,14 @@ namespace CrabWeighing
             panel.Controls.AddRange(new Control[] { icon, title, deviceRail, minimize, close });
             deviceStatus.AutoSize = false;
             deviceStatus.TextAlign = ContentAlignment.MiddleRight;
-            EventHandler align = (s, e) =>
-            {
-                deviceRail.SetBounds(panel.Width - 510, 10, 407, 32);
-                deviceStatus.SetBounds(6, 2, 396, 27);
-                minimize.SetBounds(panel.Width - 88, 9, 34, 34);
-                close.SetBounds(panel.Width - 46, 9, 34, 34);
-            };
-            panel.SizeChanged += align;
+            // Design-space bounds are scaled along with the rest of the banner.
+            deviceRail.SetBounds(770, 10, 407, 32);
+            deviceStatus.SetBounds(6, 2, 396, 27);
+            minimize.SetBounds(1192, 9, 34, 34);
+            close.SetBounds(1234, 9, 34, 34);
+            foreach (Control surface in new Control[] { panel, icon, title, deviceRail, deviceStatus })
+                EnableWindowDrag(surface);
+            hints.SetToolTip(panel, "拖动标题栏移动窗口");
             return panel;
         }
 
@@ -467,7 +568,7 @@ namespace CrabWeighing
                 Color color = e.CellStyle.ForeColor;
                 if (e.ColumnIndex == 0)
                 {
-                    textBounds.Inflate(-2, -10);
+                    textBounds.Inflate(-ConsolePaint.Pixels(ledger, 2), -ConsolePaint.Pixels(ledger, 10));
                     Color fill = move.Count > 0 ? Color.FromArgb(9, 57, 50) : Color.FromArgb(65, 20, 36);
                     ConsolePaint.Tile(e.Graphics, textBounds, 4, fill, ControlPaint.Dark(color, 0.32F));
                 }
@@ -885,7 +986,8 @@ namespace CrabWeighing
         {
             using (var form = new Form { Text = "手动扫码 / 装箱工单", StartPosition = FormStartPosition.CenterParent,
                 FormBorderStyle = FormBorderStyle.FixedDialog, ClientSize = new Size(366, 302),
-                MaximizeBox = false, MinimizeBox = false, Font = Font, BackColor = PanelColor, ForeColor = Ink })
+                MaximizeBox = false, MinimizeBox = false, Font = new Font(Font.FontFamily, 17, FontStyle.Regular, GraphicsUnit.Pixel),
+                BackColor = PanelColor, ForeColor = Ink })
             {
                 var code = new TextBox { Width = 231, MaxLength = 60, BackColor = Surface, ForeColor = Ink };
                 var inputs = Enumerable.Range(0, 4).Select(i => Amount(0, 0, 0, 10000, 1)).ToArray();
@@ -898,6 +1000,12 @@ namespace CrabWeighing
                 var read = ActionButton("读取目标");
                 grid.Controls.Add(Line(read, open), 0, 6);
                 form.Controls.Add(grid);
+                float factor = ClientSize.Width / (float)ConsoleLayout.DesignSize.Width;
+                if (Math.Abs(factor - 1) > 0.001F)
+                {
+                    ScaleContents(form, factor);
+                    form.ClientSize = new Size((int)Math.Round(366 * factor), (int)Math.Round(302 * factor));
+                }
                 Action load = () =>
                 {
                     if (string.IsNullOrWhiteSpace(code.Text)) return;
@@ -1132,7 +1240,7 @@ namespace CrabWeighing
             try
             {
                 using (Image image = Image.FromFile(path))
-                    return thumbnail ? new Bitmap(image, Math.Max(1, image.Width * 39 / image.Height), 39) :
+                    return thumbnail ? new Bitmap(image, Math.Max(1, image.Width * ConsolePaint.Pixels(ledger, 39) / image.Height), ConsolePaint.Pixels(ledger, 39)) :
                         new Bitmap(image);
             }
             catch (IOException) { return null; }
@@ -1169,7 +1277,7 @@ namespace CrabWeighing
             {
                 if (image == null) return;
                 using (var form = new Form { Text = ledger.Columns[column].HeaderText, StartPosition = FormStartPosition.CenterParent,
-                    ClientSize = new Size(640, 360), BackColor = Surface })
+                    ClientSize = new Size(ConsolePaint.Pixels(this, 640), ConsolePaint.Pixels(this, 360)), BackColor = Surface })
                 {
                     form.Controls.Add(new PictureBox { Dock = DockStyle.Fill, Image = image, SizeMode = PictureBoxSizeMode.Zoom });
                     form.ShowDialog(this);
@@ -1225,26 +1333,27 @@ namespace CrabWeighing
 
         void DrawArea(object sender, PaintEventArgs e)
         {
+            Func<int, int> px = value => ConsolePaint.Pixels(preview, value);
             string info = cameraStatus.Text;
             if (displayed != null && camera != null && !camera.Ended)
             {
                 bool online = camera.Source == CameraSource.Network || camera.Source == CameraSource.Usb;
-                var badge = new Rectangle(9, 9, 48, 20);
+                var badge = new Rectangle(px(9), px(9), px(48), px(20));
                 ConsolePaint.Tile(e.Graphics, badge, 4, online ? Color.FromArgb(139, 28, 52) :
                     Color.FromArgb(13, 84, 108), Color.FromArgb(44, 118, 142));
                 TextRenderer.DrawText(e.Graphics, online ? "LIVE" : "播放", Font, badge, Color.White,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                TextRenderer.DrawText(e.Graphics, info, Font, new Point(65, 10), Cyan, Surface);
+                TextRenderer.DrawText(e.Graphics, info, Font, new Point(px(65), px(10)), Cyan, Surface);
                 if (analyzed != null)
                 {
-                    var telemetry = new Rectangle(Math.Max(0, preview.Width - 162), 9, 151, 21);
+                    var telemetry = new Rectangle(Math.Max(0, preview.Width - px(162)), px(9), px(151), px(21));
                     TextRenderer.DrawText(e.Graphics, "识别耗时 " + inferenceMs.ToString("F1") + " ms",
                         Font, telemetry, RopeInk[1], Surface, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
-                    ConsolePaint.Dot(e.Graphics, 12, preview.Height - 22, 7, RopeInk[1]);
-                    TextRenderer.DrawText(e.Graphics, "绳色检测运行中", Font, new Point(25, preview.Height - 29), RopeInk[1], Surface);
+                    ConsolePaint.Dot(e.Graphics, px(12), preview.Height - px(22), px(7), RopeInk[1]);
+                    TextRenderer.DrawText(e.Graphics, "绳色检测运行中", Font, new Point(px(25), preview.Height - px(29)), RopeInk[1], Surface);
                 }
             }
-            else TextRenderer.DrawText(e.Graphics, info, Font, new Point(10, 9), Cyan, Surface);
+            else TextRenderer.DrawText(e.Graphics, info, Font, new Point(px(10), px(9)), Cyan, Surface);
             if (displayed == null) return;
             Rectangle bounds = preview.FrameBounds;
             if (!selectionStart.HasValue && latestObservation != null)
@@ -1323,7 +1432,7 @@ namespace CrabWeighing
                 var label = Heading(text);
                 label.Location = new Point(16, 4);
                 panel.Controls.Add(label);
-                panel.Paint += (sender, e) => ConsolePaint.Dot(e.Graphics, 3, 11, 7, accent);
+                panel.Paint += (sender, e) => ConsolePaint.Dot(e.Graphics, ConsolePaint.Pixels(panel, 3), ConsolePaint.Pixels(panel, 11), ConsolePaint.Pixels(panel, 7), accent);
             }
             panel.Paint += (sender, e) =>
             {

@@ -8,6 +8,18 @@ namespace CrabWeighing
 {
     static class ConsolePaint
     {
+        public static int Pixels(Control control, int pixels)
+        {
+            var window = control.FindForm() as MainForm;
+            return window == null ? pixels : Math.Max(1, (int)Math.Round(
+                pixels * window.ClientSize.Width / (double)ConsoleLayout.DesignSize.Width));
+        }
+
+        public static Font PaintFont(Control control, Font source)
+        {
+            return new Font(source.FontFamily, Pixels(control, (int)source.Size), source.Style, source.Unit);
+        }
+
         public static void Tile(Graphics graphics, Rectangle box, int radius, Color fill, Color border)
         {
             if (box.Width <= 1 || box.Height <= 1) return;
@@ -90,14 +102,19 @@ namespace CrabWeighing
         protected override void OnPaint(PaintEventArgs e)
         {
             ConsolePaint.Tile(e.Graphics, ClientRectangle, 5, Color.FromArgb(10, 32, 46), Color.FromArgb(12, 101, 122));
-            int top = Math.Max(2, (Height - 85) / 2);
+            Func<int, int> px = value => ConsolePaint.Pixels(this, value);
+            int top = Math.Max(2, (Height - px(85)) / 2);
             var center = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding;
-            TextRenderer.DrawText(e.Graphics, "总装箱进度", caption, new Rectangle(0, top, Width, 19), Accent, center);
-            string percent = goal == 0 ? "—" : ((double)complete / goal * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
-            TextRenderer.DrawText(e.Graphics, percent, figure, new Rectangle(0, top + 20, Width, 40), Accent, center);
-            var pill = new Rectangle(Math.Max(2, (Width - 86) / 2), top + 63, Math.Min(86, Width - 4), 22);
-            ConsolePaint.Tile(e.Graphics, pill, 10, Color.FromArgb(14, 26, 43), Color.FromArgb(25, 71, 96));
-            TextRenderer.DrawText(e.Graphics, complete + " / " + goal + " 只", caption, pill, ForeColor, center);
+            using (Font label = ConsolePaint.PaintFont(this, caption))
+            using (Font number = ConsolePaint.PaintFont(this, figure))
+            {
+                TextRenderer.DrawText(e.Graphics, "总装箱进度", label, new Rectangle(0, top, Width, px(19)), Accent, center);
+                string percent = goal == 0 ? "—" : ((double)complete / goal * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
+                TextRenderer.DrawText(e.Graphics, percent, number, new Rectangle(0, top + px(20), Width, px(40)), Accent, center);
+                var pill = new Rectangle(Math.Max(2, (Width - px(86)) / 2), top + px(63), Math.Min(px(86), Width - 4), px(22));
+                ConsolePaint.Tile(e.Graphics, pill, px(10), Color.FromArgb(14, 26, 43), Color.FromArgb(25, 71, 96));
+                TextRenderer.DrawText(e.Graphics, complete + " / " + goal + " 只", label, pill, ForeColor, center);
+            }
         }
 
         protected override void Dispose(bool disposing)
@@ -180,18 +197,23 @@ namespace CrabWeighing
         protected override void OnPaint(PaintEventArgs e)
         {
             ConsolePaint.Tile(e.Graphics, ClientRectangle, 4, BackColor, ControlPaint.Dark(tint, 0.48F));
-            ConsolePaint.Dot(e.Graphics, 9, 6, 7, tint);
-            int nameWidth = Math.Min(151, Width / 3);
+            Func<int, int> px = value => ConsolePaint.Pixels(this, value);
+            ConsolePaint.Dot(e.Graphics, px(9), px(6), px(7), tint);
+            int nameWidth = Math.Min(px(151), Width / 3);
             const TextFormatFlags text = TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
                 TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
-            TextRenderer.DrawText(e.Graphics, name, strong, new Rectangle(22, 1, nameWidth, 17), tint, text);
-            TextRenderer.DrawText(e.Graphics, detail, detailFont,
-                new Rectangle(27 + nameWidth, 1, Math.Max(1, Width - nameWidth - 76), 17),
-                Color.FromArgb(164, 179, 197), text);
-            TextRenderer.DrawText(e.Graphics, percentage, strong,
-                new Rectangle(Width - 46, 1, 38, 17), tint,
-                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-            var track = new Rectangle(9, Height - 6, Math.Max(1, Width - 18), 3);
+            using (Font label = ConsolePaint.PaintFont(this, strong))
+            using (Font description = ConsolePaint.PaintFont(this, detailFont))
+            {
+                TextRenderer.DrawText(e.Graphics, name, label, new Rectangle(px(22), 1, nameWidth, px(17)), tint, text);
+                TextRenderer.DrawText(e.Graphics, detail, description,
+                    new Rectangle(px(27) + nameWidth, 1, Math.Max(1, Width - nameWidth - px(76)), px(17)),
+                    Color.FromArgb(164, 179, 197), text);
+                TextRenderer.DrawText(e.Graphics, percentage, label,
+                    new Rectangle(Width - px(46), 1, px(38), px(17)), tint,
+                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+            var track = new Rectangle(px(9), Height - px(6), Math.Max(1, Width - px(18)), px(3));
             using (var brush = new SolidBrush(Color.FromArgb(7, 14, 26))) e.Graphics.FillRectangle(brush, track);
             using (var brush = new SolidBrush(tint))
                 e.Graphics.FillRectangle(brush, track.X, track.Y, (int)(track.Width * fraction), track.Height);
@@ -241,9 +263,11 @@ namespace CrabWeighing
         protected override void OnPaint(PaintEventArgs e)
         {
             ConsolePaint.Tile(e.Graphics, ClientRectangle, 5, Color.FromArgb(8, 24, 37), Color.FromArgb(15, 65, 86));
-            ConsolePaint.Dot(e.Graphics, 9, 11, 5, ForeColor);
-            TextRenderer.DrawText(e.Graphics, "实时净重", caption, new Point(20, 6), ForeColor);
-            var room = new Rectangle(8, 17, Math.Max(1, Width - 16), Math.Max(1, Height - 18));
+            Func<int, int> px = value => ConsolePaint.Pixels(this, value);
+            ConsolePaint.Dot(e.Graphics, px(9), px(11), px(5), ForeColor);
+            using (Font label = ConsolePaint.PaintFont(this, caption))
+                TextRenderer.DrawText(e.Graphics, "实时净重", label, new Point(px(20), px(6)), ForeColor);
+            var room = new Rectangle(px(8), px(17), Math.Max(1, Width - px(16)), Math.Max(1, Height - px(18)));
             TextRenderer.DrawText(e.Graphics, Text, Font, room, ForeColor,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
@@ -282,6 +306,7 @@ namespace CrabWeighing
             base.OnPaint(e);
             if (Height < 6) return;
             int rowHeight = Height / 6;
+            using (Font heading = ConsolePaint.PaintFont(this, headerFont))
             for (int row = 0; row <= rows.Length; row++)
             {
                 var band = new Rectangle(0, row * rowHeight, Width, rowHeight);
@@ -310,7 +335,7 @@ namespace CrabWeighing
                         cell.X += 17;
                         cell.Width -= 17;
                     }
-                    TextRenderer.DrawText(e.Graphics, cells[col], row == 0 ? headerFont : Font, cell, ink,
+                    TextRenderer.DrawText(e.Graphics, cells[col], row == 0 ? heading : Font, cell, ink,
                         TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
                         (col == 0 ? TextFormatFlags.Left : TextFormatFlags.HorizontalCenter));
                 }

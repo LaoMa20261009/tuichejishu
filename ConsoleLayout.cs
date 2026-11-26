@@ -9,8 +9,10 @@ namespace CrabWeighing
 
         public static Rectangle WindowBounds(Rectangle screen)
         {
-            int width = Math.Min(DesignSize.Width, screen.Width);
-            int height = Math.Min(DesignSize.Height, screen.Height);
+            double factor = Math.Min(2, Math.Min(screen.Width / (double)DesignSize.Width,
+                screen.Height / (double)DesignSize.Height));
+            int width = (int)Math.Round(DesignSize.Width * factor);
+            int height = (int)Math.Round(DesignSize.Height * factor);
             return new Rectangle(screen.X + (screen.Width - width) / 2,
                 screen.Y + (screen.Height - height) / 2, width, height);
         }
