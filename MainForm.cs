@@ -1065,14 +1065,9 @@ namespace CrabWeighing
             captureStatus.Text = "正在读取标签照片";
             try
             {
-                var labels = await LabelPhoto.ReadAsync(filename);
+                LabelPhotoResult reading = await LabelPhoto.ReadAsync(filename);
                 if (closing || IsDisposed) return;
-                if (labels.Length == 0)
-                {
-                    MessageBox.Show(this, "未匹配到完整的规格和数量。请拍清标签，或手动录入。");
-                    return;
-                }
-                EditOrder(labels, filename);
+                EditOrder(reading.Specs, filename, reading);
             }
             catch (Exception ex)
             {
@@ -1089,37 +1084,55 @@ namespace CrabWeighing
             EditOrder(new LabelSpec[0]);
         }
 
-        void EditOrder(LabelSpec[] labels, string photo = null)
+        void EditOrder(LabelSpec[] labels, string photo = null, LabelPhotoResult reading = null)
         {
-            using (var form = new Form { Text = labels.Length == 0 ? "手动扫码 / 装箱工单" : "核对标签识别结果", StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog, ClientSize = new Size(366, 302),
+            bool importing = photo != null;
+            int dialogWidth = importing ? 482 : 366;
+            using (var form = new Form { Text = importing ? "核对标签识别结果" : "手动扫码 / 装箱工单",
+                StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog,
+                ClientSize = new Size(dialogWidth, 302),
                 MaximizeBox = false, MinimizeBox = false, Font = new Font(Font.FontFamily, 17, FontStyle.Regular, GraphicsUnit.Pixel),
                 BackColor = PanelColor, ForeColor = Ink })
             {
                 var code = new TextBox { Width = 231, MaxLength = 60, BackColor = Surface, ForeColor = Ink,
-                    Text = labels.Length == 0 ? "" : "BX-" + DateTime.Now.ToString("yyyyMMdd-HHmmssfff") };
+                    Text = !importing ? "" : "BX-" + DateTime.Now.ToString("yyyyMMdd-HHmmssfff") };
                 var inputs = Enumerable.Range(0, 4).Select(i => Amount(0, 0, 0, 10000, 1)).ToArray();
                 var grid = Card(7);
                 Rows(grid, 40, 28, 34, 34, 34, 34, 44);
                 grid.Controls.Add(Line(Note("箱码"), code), 0, 0);
-                grid.Controls.Add(Note(labels.Length == 0 ? "可用键盘式扫码枪。输入箱码后读取目标。" :
-                    "已匹配 " + labels.Length + " 个绳色，请核对后启用。"), 0, 1);
+                var lows = new TextBox[4];
+                var highs = new TextBox[4];
+                string introduction = !importing ? "可用键盘式扫码枪。输入箱码后读取目标。" :
+                    labels.Length == 0 ? "未提取出完整条目，可查看识别文字并手动补填。" :
+                    "提取到 " + labels.Length + " 种绳色，启用前请对照照片核对。";
+                grid.Controls.Add(Note(introduction), 0, 1);
                 for (int i = 0; i < 4; i++)
                 {
-                    LabelSpec spec = labels.FirstOrDefault(entry => entry.Color == i);
+                    var spec = labels.FirstOrDefault(entry => entry.Color == i);
                     if (spec != null) inputs[i].Value = spec.Quantity;
-                    grid.Controls.Add(Line(ColorLabel(i), inputs[i], Note("只"),
-                        Note(spec == null ? "" : spec.Name)), 0, i + 2);
+                    if (!importing)
+                    {
+                        grid.Controls.Add(Line(ColorLabel(i), inputs[i], Note("只")), 0, i + 2);
+                        continue;
+                    }
+                    lows[i] = WeightInput(0);
+                    highs[i] = WeightInput(0);
+                    lows[i].Text = spec == null ? "" : spec.Minimum.ToString(CultureInfo.CurrentCulture);
+                    highs[i].Text = spec == null ? "" : spec.Maximum.ToString(CultureInfo.CurrentCulture);
+                    grid.Controls.Add(Line(ColorLabel(i), lows[i], Note("–"), highs[i],
+                        Note("g/只"), inputs[i], Note("目标只数")), 0, i + 2);
                 }
                 var open = ActionButton("启用工单");
                 var read = ActionButton("读取目标");
-                grid.Controls.Add(Line(read, open), 0, 6);
+                var raw = ActionButton("查看识别文字");
+                raw.Click += (s, e) => ShowOcrTranscript(form, reading);
+                grid.Controls.Add(importing ? Line(raw, open) : Line(read, open), 0, 6);
                 form.Controls.Add(grid);
                 float factor = ClientSize.Width / (float)ConsoleLayout.DesignSize.Width;
                 if (Math.Abs(factor - 1) > 0.001F)
                 {
                     ScaleContents(form, factor);
-                    form.ClientSize = new Size((int)Math.Round(366 * factor), (int)Math.Round(302 * factor));
+                    form.ClientSize = new Size((int)Math.Round(dialogWidth * factor), (int)Math.Round(302 * factor));
                 }
                 Action load = () =>
                 {
@@ -1138,30 +1151,51 @@ namespace CrabWeighing
                     }
                     catch (Exception ex) { MessageBox.Show(form, ex.Message, "读取工单失败"); }
                 };
-                read.Visible = labels.Length == 0;
                 read.Click += (s, e) => load();
                 code.KeyDown += (s, e) =>
                 {
                     if (e.KeyCode != Keys.Enter) return;
                     e.SuppressKeyPress = true;
-                    if (labels.Length == 0) load();
+                    if (!importing) load();
                     inputs[0].Focus();
                 };
                 open.Click += (s, e) =>
                 {
                     try
                     {
+                        string[] specLines = null;
+                        if (importing)
+                        {
+                            if (inputs.All(input => input.Value == 0))
+                            {
+                                MessageBox.Show(form, "请至少填写一种绳色的目标只数。");
+                                return;
+                            }
+                            specLines = new string[4];
+                            for (int i = 0; i < specLines.Length; i++)
+                            {
+                                decimal low, high;
+                                if (inputs[i].Value == 0 && lows[i].Text.Length == 0 && highs[i].Text.Length == 0)
+                                {
+                                    specLines[i] = savedNames[i] + "\t" + savedMinimum[i].ToString(CultureInfo.InvariantCulture) +
+                                        "\t" + savedMaximum[i].ToString(CultureInfo.InvariantCulture);
+                                    continue;
+                                }
+                                if (!TryReadWeight(lows[i], out low) || !TryReadWeight(highs[i], out high) || low <= 0 || low > high)
+                                {
+                                    MessageBox.Show(form, "请核对" + Basket.Colors[i] + "的单只重量范围。");
+                                    return;
+                                }
+                                string grade = low.ToString("0.###", CultureInfo.InvariantCulture) + "–" +
+                                    high.ToString("0.###", CultureInfo.InvariantCulture) + "g";
+                                specLines[i] = grade + "\t" + low.ToString(CultureInfo.InvariantCulture) +
+                                    "\t" + high.ToString(CultureInfo.InvariantCulture);
+                            }
+                        }
                         var selected = new PackingOrder(OrdersFolder, code.Text.Trim(), inputs.Select(input => (int)input.Value).ToArray());
                         selected.SaveGoals();
-                        if (labels.Length > 0)
+                        if (specLines != null)
                         {
-                            var specLines = Enumerable.Range(0, 4).Select(i =>
-                            {
-                                var label = labels.FirstOrDefault(item => item.Color == i);
-                                return (label == null ? savedNames[i] : label.Name) + "\t" +
-                                    (label == null ? savedMinimum[i] : (double)label.Minimum).ToString(CultureInfo.InvariantCulture) + "\t" +
-                                    (label == null ? savedMaximum[i] : (double)label.Maximum).ToString(CultureInfo.InvariantCulture);
-                            });
                             File.WriteAllLines(Path.Combine(selected.Folder, "packing-specs.tsv"), specLines);
                             using (Image image = Image.FromFile(photo))
                             using (var previewImage = new Bitmap(image, 160, Math.Max(1, image.Height * 160 / image.Width)))
@@ -1181,6 +1215,21 @@ namespace CrabWeighing
                     catch (Exception ex) { MessageBox.Show(form, ex.Message, "启用工单失败"); }
                 };
                 form.ShowDialog(this);
+            }
+        }
+
+        void ShowOcrTranscript(Form owner, LabelPhotoResult reading)
+        {
+            using (var form = new Form { Text = "标签文字识别结果", StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(610, 370), Font = new Font(Font.FontFamily, 16, FontStyle.Regular, GraphicsUnit.Pixel) })
+            {
+                string info = reading == null ? "" : reading.Note;
+                string transcript = reading == null ? "" : reading.Transcript;
+                form.Controls.Add(new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true,
+                    ScrollBars = ScrollBars.Both, WordWrap = false, BackColor = Surface, ForeColor = Ink,
+                    Text = (info.Length == 0 ? "" : info + Environment.NewLine + Environment.NewLine) +
+                        (transcript.Length == 0 ? "OCR 没有返回可供核对的文字。" : transcript) });
+                form.ShowDialog(owner);
             }
         }
 
