@@ -37,6 +37,7 @@
     <Compile Include="Measurement.cs" />
     <Compile Include="Basket.cs" />
     <Compile Include="CrabVision.cs" />
+    <Compile Include="Packing.cs" />
     <Compile Include="DashboardControls.cs" />
     <None Include="README.md" />
     <None Include="app.manifest" />
