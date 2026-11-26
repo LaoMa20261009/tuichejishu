@@ -1,9 +1,112 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Windows.Forms;
 
 namespace CrabWeighing
 {
+    static class ConsolePaint
+    {
+        public static void Tile(Graphics graphics, Rectangle box, int radius, Color fill, Color border)
+        {
+            if (box.Width <= 1 || box.Height <= 1) return;
+            SmoothingMode smoothing = graphics.SmoothingMode;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            int diameter = Math.Min(radius * 2, Math.Min(box.Width - 1, box.Height - 1));
+            using (var path = new GraphicsPath())
+            {
+                int right = box.Right - 1, bottom = box.Bottom - 1;
+                path.AddArc(box.X, box.Y, diameter, diameter, 180, 90);
+                path.AddArc(right - diameter, box.Y, diameter, diameter, 270, 90);
+                path.AddArc(right - diameter, bottom - diameter, diameter, diameter, 0, 90);
+                path.AddArc(box.X, bottom - diameter, diameter, diameter, 90, 90);
+                path.CloseFigure();
+                using (var brush = new SolidBrush(fill)) graphics.FillPath(brush, path);
+                using (var pen = new Pen(border)) graphics.DrawPath(pen, path);
+            }
+            graphics.SmoothingMode = smoothing;
+        }
+
+        public static void Dot(Graphics graphics, int x, int y, int diameter, Color color)
+        {
+            var smoothing = graphics.SmoothingMode;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var brush = new SolidBrush(color)) graphics.FillEllipse(brush, x, y, diameter, diameter);
+            graphics.SmoothingMode = smoothing;
+        }
+    }
+
+    sealed class ConsoleCard : TableLayoutPanel
+    {
+        public Color Outline { get; set; }
+
+        public ConsoleCard()
+        {
+            DoubleBuffered = true;
+            Outline = Color.FromArgb(47, 61, 80);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            e.Graphics.Clear(Parent == null ? BackColor : Parent.BackColor);
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, 5, BackColor, Outline);
+        }
+    }
+
+    sealed class BoxMark : Control
+    {
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, 4, Color.FromArgb(224, 238, 247), Color.FromArgb(184, 202, 219));
+            using (var pen = new Pen(Color.FromArgb(17, 48, 67), 2))
+            {
+                int left = 10, top = 10, right = Width - 11, bottom = Height - 11;
+                e.Graphics.DrawLines(pen, new[] { new Point(left, top + 7), new Point(left, top), new Point(left + 7, top) });
+                e.Graphics.DrawLines(pen, new[] { new Point(right - 7, top), new Point(right, top), new Point(right, top + 7) });
+                e.Graphics.DrawLines(pen, new[] { new Point(left, bottom - 7), new Point(left, bottom), new Point(left + 7, bottom) });
+                e.Graphics.DrawLines(pen, new[] { new Point(right - 7, bottom), new Point(right, bottom), new Point(right, bottom - 7) });
+                e.Graphics.DrawRectangle(pen, left + 7, top + 8, right - left - 14, bottom - top - 16);
+                e.Graphics.DrawLine(pen, left + 7, top + 13, right - 7, top + 13);
+            }
+            base.OnPaint(e);
+        }
+    }
+
+    sealed class OverallProgress : Control
+    {
+        static readonly Color Accent = Color.FromArgb(34, 211, 238);
+        readonly Font figure = new Font("Consolas", 32, FontStyle.Bold, GraphicsUnit.Pixel);
+        readonly Font caption = new Font("Microsoft YaHei UI", 13, FontStyle.Bold, GraphicsUnit.Pixel);
+        int complete, goal;
+
+        public void SetProgress(int complete, int goal)
+        {
+            this.complete = complete;
+            this.goal = goal;
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, 5, Color.FromArgb(10, 32, 46), Color.FromArgb(12, 101, 122));
+            int top = Math.Max(2, (Height - 85) / 2);
+            var center = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding;
+            TextRenderer.DrawText(e.Graphics, "总装箱进度", caption, new Rectangle(0, top, Width, 19), Accent, center);
+            string percent = goal == 0 ? "—" : ((double)complete / goal * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
+            TextRenderer.DrawText(e.Graphics, percent, figure, new Rectangle(0, top + 20, Width, 40), Accent, center);
+            var pill = new Rectangle(Math.Max(2, (Width - 86) / 2), top + 63, Math.Min(86, Width - 4), 22);
+            ConsolePaint.Tile(e.Graphics, pill, 10, Color.FromArgb(14, 26, 43), Color.FromArgb(25, 71, 96));
+            TextRenderer.DrawText(e.Graphics, complete + " / " + goal + " 只", caption, pill, ForeColor, center);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { figure.Dispose(); caption.Dispose(); }
+            base.Dispose(disposing);
+        }
+    }
+
     sealed class VideoSurface : Control
     {
         Image frame;
@@ -53,7 +156,9 @@ namespace CrabWeighing
     sealed class TaskMeter : Control
     {
         readonly Color tint;
-        string caption = "";
+        readonly Font strong = new Font("Microsoft YaHei UI", 14, FontStyle.Bold, GraphicsUnit.Pixel);
+        readonly Font detailFont = new Font("Microsoft YaHei UI", 13, FontStyle.Regular, GraphicsUnit.Pixel);
+        string name = "", detail = "", percentage = "—";
         double fraction;
 
         public TaskMeter(Color tint, Color background)
@@ -66,20 +171,39 @@ namespace CrabWeighing
         public void SetProgress(string name, int packed, int goal)
         {
             fraction = goal == 0 ? 0 : Math.Min(1, (double)packed / goal);
-            caption = name + "    目标 " + goal + " 只  /  已装 " + packed + " 只";
+            this.name = name;
+            detail = "目标 " + goal + " 只   |   已装 " + packed + " 只";
+            percentage = goal == 0 ? "—" : (fraction * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
             Invalidate();
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            var bounds = new Rectangle(8, 0, Math.Max(0, Width - 16), Math.Max(0, Height - 4));
-            TextRenderer.DrawText(e.Graphics, caption, Font, bounds, tint,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, 4, BackColor, ControlPaint.Dark(tint, 0.48F));
+            ConsolePaint.Dot(e.Graphics, 9, 6, 7, tint);
+            int nameWidth = Math.Min(151, Width / 3);
+            const TextFormatFlags text = TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
+            TextRenderer.DrawText(e.Graphics, name, strong, new Rectangle(22, 1, nameWidth, 17), tint, text);
+            TextRenderer.DrawText(e.Graphics, detail, detailFont,
+                new Rectangle(27 + nameWidth, 1, Math.Max(1, Width - nameWidth - 76), 17),
+                Color.FromArgb(164, 179, 197), text);
+            TextRenderer.DrawText(e.Graphics, percentage, strong,
+                new Rectangle(Width - 46, 1, 38, 17), tint,
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            var track = new Rectangle(9, Height - 6, Math.Max(1, Width - 18), 3);
+            using (var brush = new SolidBrush(Color.FromArgb(7, 14, 26))) e.Graphics.FillRectangle(brush, track);
             using (var brush = new SolidBrush(tint))
-                e.Graphics.FillRectangle(brush, bounds.X, bounds.Bottom, (int)(bounds.Width * fraction), 2);
-            base.OnPaint(e);
+                e.Graphics.FillRectangle(brush, track.X, track.Y, (int)(track.Width * fraction), track.Height);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { strong.Dispose(); detailFont.Dispose(); }
+            base.Dispose(disposing);
         }
     }
+
     sealed class ConsoleButton : Button
     {
         bool hover;
@@ -101,9 +225,8 @@ namespace CrabWeighing
         protected override void OnPaint(PaintEventArgs e)
         {
             Color fill = Enabled && hover ? ControlPaint.Light(BackColor, 0.12F) : BackColor;
-            using (var brush = new SolidBrush(fill)) e.Graphics.FillRectangle(brush, ClientRectangle);
-            using (var pen = new Pen(ControlPaint.Light(fill, 0.28F)))
-                e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+            e.Graphics.Clear(Parent == null ? fill : Parent.BackColor);
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, 4, fill, ControlPaint.Light(fill, 0.22F));
             TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, Enabled ? ForeColor : Color.FromArgb(128, 144, 165),
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             if (Focused && ShowFocusCues)
@@ -113,11 +236,22 @@ namespace CrabWeighing
 
     sealed class WeightReadout : Label
     {
+        readonly Font caption = new Font("Microsoft YaHei UI", 12, FontStyle.Bold, GraphicsUnit.Pixel);
+
         protected override void OnPaint(PaintEventArgs e)
         {
-            var room = new Rectangle(6, 0, Math.Max(1, Width - 12), Height);
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, 5, Color.FromArgb(8, 24, 37), Color.FromArgb(15, 65, 86));
+            ConsolePaint.Dot(e.Graphics, 9, 11, 5, ForeColor);
+            TextRenderer.DrawText(e.Graphics, "实时净重", caption, new Point(20, 6), ForeColor);
+            var room = new Rectangle(8, 17, Math.Max(1, Width - 16), Math.Max(1, Height - 18));
             TextRenderer.DrawText(e.Graphics, Text, Font, room, ForeColor,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) caption.Dispose();
+            base.Dispose(disposing);
         }
     }
 
@@ -165,8 +299,17 @@ namespace CrabWeighing
                     offset += widths[col];
                     int right = Width * offset / 100;
                     var cell = Rectangle.FromLTRB(left + 5, band.Top, right - 3, band.Bottom);
-                    Color ink = row == 0 ? ForeColor : row == rows.Length ? Color.FromArgb(34, 211, 238) :
-                        col == 0 ? colorInks[row - 1] : col == 2 ? colorInks[1] : ForeColor;
+                    Color ink = row == 0 ? ForeColor :
+                        col == 2 || col == 5 ? colorInks[1] :
+                        col == 3 ? Color.FromArgb(252, 196, 71) :
+                        row == rows.Length ? Color.FromArgb(34, 211, 238) : ForeColor;
+                    if (col == 0 && row > 0)
+                    {
+                        ConsolePaint.Dot(e.Graphics, left + 8, band.Top + (band.Height - 7) / 2, 7,
+                            row == rows.Length ? Color.FromArgb(34, 211, 238) : colorInks[row - 1]);
+                        cell.X += 17;
+                        cell.Width -= 17;
+                    }
                     TextRenderer.DrawText(e.Graphics, cells[col], row == 0 ? headerFont : Font, cell, ink,
                         TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
                         (col == 0 ? TextFormatFlags.Left : TextFormatFlags.HorizontalCenter));
