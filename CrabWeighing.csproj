@@ -37,6 +37,8 @@
     <Compile Include="Measurement.cs" />
     <Compile Include="Basket.cs" />
     <Compile Include="CrabVision.cs" />
+    <Compile Include="FoamBox.cs" />
+    <Compile Include="LabelPhoto.cs" />
     <Compile Include="Packing.cs" />
     <Compile Include="DashboardControls.cs" />
     <Compile Include="ConsoleLayout.cs" />

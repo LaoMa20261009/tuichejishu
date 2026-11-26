@@ -58,7 +58,7 @@ namespace CrabWeighing
                 int color, count;
                 double delta, weight;
                 if (fields.Length != 10 || !DateTimeOffset.TryParseExact(fields[0], "o", CultureInfo.InvariantCulture,
-                    DateTimeStyles.None, out at) || !int.TryParse(fields[1], out color) || color < 0 || color >= 4 ||
+                    DateTimeStyles.None, out at) || !int.TryParse(fields[1], out color) || color < -1 || color >= 4 ||
                     !int.TryParse(fields[2], out count) || !double.TryParse(fields[3], NumberStyles.Float,
                     CultureInfo.InvariantCulture, out delta) || !double.TryParse(fields[4], NumberStyles.Float,
                     CultureInfo.InvariantCulture, out weight)) continue;
@@ -79,11 +79,7 @@ namespace CrabWeighing
         public void Append(PackingMove move)
         {
             Directory.CreateDirectory(Folder);
-            string line = string.Join("\t", move.Time.ToString("o", CultureInfo.InvariantCulture),
-                move.Color.ToString(), move.Count.ToString(), move.Delta.ToString("F1", CultureInfo.InvariantCulture),
-                move.Weight.ToString("F1", CultureInfo.InvariantCulture), move.Spec.Replace('\t', ' '),
-                move.Before, move.After, move.Target, move.OutsideRange ? "1" : "0");
-            byte[] bytes = Encoding.UTF8.GetBytes(line + Environment.NewLine);
+            byte[] bytes = Encoding.UTF8.GetBytes(Serialize(move) + Environment.NewLine);
             using (var ledger = new FileStream(Path.Combine(Folder, "moves.tsv"), FileMode.OpenOrCreate,
                 FileAccess.Write, FileShare.Read))
             {
@@ -103,9 +99,35 @@ namespace CrabWeighing
             Track(move);
         }
 
+        public void ResolveLast(PackingMove confirmed)
+        {
+            int index = Moves.Count - 1;
+            if (index < 0 || Moves[index].Color != -1) throw new InvalidOperationException("没有可补全的称重记录。");
+            confirmed.Time = Moves[index].Time;
+            string ledger = Path.Combine(Folder, "moves.tsv");
+            string temporary = ledger + "." + Guid.NewGuid().ToString("N");
+            try
+            {
+                File.WriteAllLines(temporary, Moves.Take(index).Concat(new[] { confirmed }).Select(Serialize), Encoding.UTF8);
+                File.Replace(temporary, ledger, null);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            Moves.RemoveAt(index);
+            Track(confirmed);
+        }
+
+        static string Serialize(PackingMove move)
+        {
+            return string.Join("\t", move.Time.ToString("o", CultureInfo.InvariantCulture),
+                move.Color.ToString(), move.Count.ToString(), move.Delta.ToString("F1", CultureInfo.InvariantCulture),
+                move.Weight.ToString("F1", CultureInfo.InvariantCulture), move.Spec.Replace('	', ' '),
+                move.Before, move.After, move.Target, move.OutsideRange ? "1" : "0");
+        }
+
         void Track(PackingMove move)
         {
             Moves.Add(move);
+            if (move.Color < 0) return;
             Counts[move.Color] += move.Count;
             Weights[move.Color] += move.Delta;
             if (Counts[move.Color] == 0) Weights[move.Color] = 0;

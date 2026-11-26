@@ -22,7 +22,8 @@ namespace CrabWeighing
             Color.FromArgb(111, 167, 255), Color.FromArgb(232, 239, 250) };
         static readonly Color[] RopeFill = { Color.FromArgb(38, 23, 41), Color.FromArgb(14, 35, 43),
             Color.FromArgb(20, 31, 62), Color.FromArgb(28, 37, 54) };
-        static readonly int[] DemoCounts = { 0, 1, 2, 3, 4, 3, 2, 1 };
+        static readonly int[] DemoColors = { 0, 1, 2, 3, 1, 3, 2, 0 };
+        static readonly int[] DemoChanges = { 1, 2, 3, 4, -2, -4, -3, -1 };
         static readonly string[] DefaultNames = { "2.0两母", "2.5两母", "3.0两公", "统货标准" };
         static readonly int[] DefaultMin = { 90, 115, 140, 80 };
         static readonly int[] DefaultMax = { 110, 135, 160, 95 };
@@ -42,6 +43,7 @@ namespace CrabWeighing
         string[] savedNames;
         double[] savedMinimum, savedMaximum;
         readonly Label deviceStatus = Note("");
+        readonly BoxMark boxMark = new BoxMark { BackColor = Surface, AccessibleName = "上传泡沫箱标签照片", Cursor = Cursors.Hand };
         readonly Label taskCode = Note("未选择工单");
         readonly Label taskState = Note("");
         readonly OverallProgress overallProgress = new OverallProgress();
@@ -64,7 +66,7 @@ namespace CrabWeighing
         readonly ComboBox protocol = Choice("主动上报", "被动查询", "数字 OP 盒");
         readonly CheckBox demoScale = new CheckBox { Text = "模拟秤", AutoSize = true, Margin = new Padding(8, 7, 4, 3) };
         readonly Button scaleButton = ActionButton("连接秤");
-        readonly NumericUpDown crabCount = Amount(0, 0, 0, 6, 1);
+        readonly NumericUpDown crabCount = Amount(0, 0, 0, 12, 1);
         readonly CheckBox cycleLoads = new CheckBox { Text = "自动放蟹", AutoSize = true,
             Margin = new Padding(10, 7, 4, 3) };
         FlowLayoutPanel simulationControls;
@@ -93,8 +95,15 @@ namespace CrabWeighing
         CrabObservation stableObservation;
         int matchingFrames;
         bool simulationOpen;
-        volatile int simulationCount;
+        volatile int[] simulationColors = new int[0];
+        Rectangle foundBox, previousBox;
+        bool importingLabel;
+        string displayedLabelPath;
         int demoStep;
+        long weightCandidateSince;
+        double weightCandidate;
+        double lastUnclassifiedWeight = double.NaN;
+        int unclassifiedMoves;
         long nextDemoStep;
         bool changingDemoCount;
         long cameraStarted;
@@ -175,16 +184,22 @@ namespace CrabWeighing
             };
             crabCount.ValueChanged += (s, e) =>
             {
-                if (!changingDemoCount) cycleLoads.Checked = false;
-                simulationCount = (int)crabCount.Value;
-                simulatedScale.SetCount(simulationCount, appliedReferences);
+                if (changingDemoCount) return;
+                cycleLoads.Checked = false;
+                var colors = simulatedScale.Colors;
+                int change = (int)crabCount.Value - colors.Length;
+                int color = change < 0 && colors.Length > 0 ? colors[colors.Length - 1] : 0;
+                if (change < 0) change = -Math.Min(-change, colors.Count(item => item == color));
+                simulatedScale.Adjust(color, change, appliedReferences);
+                UpdateDemoCount();
             };
             cycleLoads.CheckedChanged += (s, e) =>
             {
                 if (!cycleLoads.Checked) return;
                 demoStep = 0;
-                SetDemoCount(0);
-                nextDemoStep = Stopwatch.GetTimestamp() + 3 * Stopwatch.Frequency;
+                simulatedScale.Clear();
+                UpdateDemoCount();
+                nextDemoStep = Stopwatch.GetTimestamp() + 4 * Stopwatch.Frequency;
             };
             LoadReferences();
             ApplySpecInputs();
@@ -479,8 +494,9 @@ namespace CrabWeighing
             detail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             var box = new Panel { Dock = DockStyle.Fill, BackColor = PanelColor, Margin = new Padding(0, 4, 9, 0) };
             box.Paint += (sender, e) => ConsolePaint.Tile(e.Graphics, box.ClientRectangle, 5, Surface, Color.FromArgb(19, 80, 101));
-            var mark = new BoxMark { BackColor = Surface, AccessibleName = "箱码工单" };
-            mark.SetBounds(10, 25, 49, 49);
+            boxMark.Click += async (s, e) => await ImportBoxPhoto();
+            hints.SetToolTip(boxMark, "点击上传泡沫箱标签照片");
+            boxMark.SetBounds(10, 25, 49, 49);
             var icon = Heading("泡沫箱");
             icon.Font = new Font(Font.FontFamily, 16, FontStyle.Bold, GraphicsUnit.Pixel);
             icon.BackColor = Surface;
@@ -496,7 +512,7 @@ namespace CrabWeighing
             taskState.Padding = new Padding(5, 1, 5, 1);
             taskState.Font = new Font(Font.FontFamily, 13, FontStyle.Bold, GraphicsUnit.Pixel);
             taskState.BackColor = Color.FromArgb(9, 49, 48);
-            box.Controls.AddRange(new Control[] { mark, icon, taskCode, taskState });
+            box.Controls.AddRange(new Control[] { boxMark, icon, taskCode, taskState });
             detail.Controls.Add(box, 0, 0);
             var bands = Columns(1);
             bands.Margin = new Padding(0, 4, 0, 0);
@@ -569,7 +585,7 @@ namespace CrabWeighing
                 if (e.ColumnIndex == 0)
                 {
                     textBounds.Inflate(-ConsolePaint.Pixels(ledger, 2), -ConsolePaint.Pixels(ledger, 10));
-                    Color fill = move.Count > 0 ? Color.FromArgb(9, 57, 50) : Color.FromArgb(65, 20, 36);
+                    Color fill = move.Delta > 0 ? Color.FromArgb(9, 57, 50) : Color.FromArgb(65, 20, 36);
                     ConsolePaint.Tile(e.Graphics, textBounds, 4, fill, ControlPaint.Dark(color, 0.32F));
                 }
                 if (e.ColumnIndex == 6)
@@ -688,7 +704,7 @@ namespace CrabWeighing
                     string bundled = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, executable);
                     if (File.Exists(bundled)) executable = bundled;
                 }
-                camera = new CameraSession(source, address.Text.Trim(), executable, () => simulationCount);
+                camera = new CameraSession(source, address.Text.Trim(), executable, () => simulationColors);
                 if (source == CameraSource.File)
                 {
                     baselineFrame = null;
@@ -743,7 +759,8 @@ namespace CrabWeighing
                     scale.Close();
                     simulationOpen = false;
                     cycleLoads.Checked = false;
-                    SetDemoCount(0);
+                    simulatedScale.Clear();
+                    UpdateDemoCount();
                 }
                 else if (demoScale.Checked)
                 {
@@ -835,11 +852,32 @@ namespace CrabWeighing
                 }
             }
 
-            if (simulationOpen && cycleLoads.Checked && now >= nextDemoStep)
+            if (simulationOpen && cycleLoads.Checked && camera != null)
             {
-                demoStep = (demoStep + 1) % DemoCounts.Length;
-                SetDemoCount(DemoCounts[demoStep]);
-                nextDemoStep = now + 5 * Stopwatch.Frequency;
+                if (camera.Source == CameraSource.Demo && now >= nextDemoStep)
+                {
+                    simulatedScale.Adjust(DemoColors[demoStep], DemoChanges[demoStep], appliedReferences);
+                    demoStep = (demoStep + 1) % DemoChanges.Length;
+                    UpdateDemoCount();
+                    nextDemoStep = now + 6 * Stopwatch.Frequency;
+                }
+                else if (camera.Source != CameraSource.Demo && stableObservation != null &&
+                    matchingFrames >= 2 && analyzed != null && CaptureGate.Elapsed(now, analyzed.Tick) <= 0.65)
+                {
+                    int[] current = new int[4];
+                    foreach (int color in simulatedScale.Colors) current[color]++;
+                    int[] changed = Enumerable.Range(0, 4).Where(i => current[i] != stableObservation.Counts[i]).ToArray();
+                    if (changed.Length == 1)
+                    {
+                        int color = changed[0];
+                        int change = stableObservation.Counts[color] - current[color];
+                        if (Math.Abs(change) <= 4 && stableObservation.Counts.Sum() <= 12)
+                        {
+                            simulatedScale.Adjust(color, change, appliedReferences);
+                            UpdateDemoCount();
+                        }
+                    }
+                }
             }
             WeightSample sample = simulationOpen ? simulatedScale.Read(now)
                 : scale.IsOpen ? scale.Latest : null;
@@ -861,10 +899,11 @@ namespace CrabWeighing
             return sample;
         }
 
-        void SetDemoCount(int count)
+        void UpdateDemoCount()
         {
+            simulationColors = simulatedScale.Colors;
             changingDemoCount = true;
-            try { crabCount.Value = count; }
+            try { crabCount.Value = simulationColors.Length; }
             finally { changingDemoCount = false; }
         }
 
@@ -906,25 +945,54 @@ namespace CrabWeighing
                 analyzed = frame;
                 lastAnalysis = now;
                 long started = Stopwatch.GetTimestamp();
-                var observation = CrabVision.Read(frame, area, 0.12);
+                Rectangle box = FoamBox.Find(frame, area);
+                var overlap = Rectangle.Intersect(previousBox, box);
+                bool sameBox = !box.IsEmpty && !previousBox.IsEmpty &&
+                    overlap.Width * overlap.Height >= 0.65 * Math.Max(previousBox.Width * previousBox.Height, box.Width * box.Height);
+                previousBox = box;
+                if (!sameBox)
+                {
+                    foundBox = Rectangle.Empty;
+                    matchingFrames = 0;
+                    latestObservation = stableObservation = null;
+                }
+                else
+                {
+                    foundBox = box;
+                    var observation = CrabVision.Read(frame, foundBox, 0.12);
+                    matchingFrames = latestObservation != null && latestObservation.Signature == observation.Signature
+                        ? matchingFrames + 1 : 1;
+                    latestObservation = observation;
+                    if (matchingFrames >= 2) stableObservation = observation;
+                }
                 inferenceMs = CaptureGate.Elapsed(Stopwatch.GetTimestamp(), started) * 1000;
-                matchingFrames = latestObservation != null && latestObservation.Signature == observation.Signature
-                    ? matchingFrames + 1 : 1;
-                latestObservation = observation;
-                if (matchingFrames >= 2) stableObservation = observation;
                 preview.Invalidate();
             }
             return analyzed == null || matchingFrames < 2 ? 0 : analyzed.Tick;
         }
 
-        string SpecificationsFile { get { return Path.Combine(DataFolder, "packing-specs.tsv"); } }
+        string SpecificationsFile { get { return Path.Combine(order == null ? DataFolder : order.Folder, "packing-specs.tsv"); } }
+
+        void ReloadSpecifications()
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                productNames[i].Text = DefaultNames[i];
+                minimumWeights[i].Text = DefaultMin[i].ToString(CultureInfo.CurrentCulture);
+                maximumWeights[i].Text = DefaultMax[i].ToString(CultureInfo.CurrentCulture);
+            }
+            LoadReferences();
+            ApplySpecInputs();
+        }
 
         void LoadReferences()
         {
             try
             {
-                if (!File.Exists(SpecificationsFile)) return;
-                string[] lines = File.ReadAllLines(SpecificationsFile);
+                string path = SpecificationsFile;
+                if (!File.Exists(path)) path = Path.Combine(DataFolder, "packing-specs.tsv");
+                if (!File.Exists(path)) return;
+                string[] lines = File.ReadAllLines(path);
                 for (int i = 0; i < Math.Min(4, lines.Length); i++)
                 {
                     string[] fields = lines[i].Split('\t');
@@ -969,33 +1037,80 @@ namespace CrabWeighing
             }
             try
             {
-                Directory.CreateDirectory(DataFolder);
+                Directory.CreateDirectory(Path.GetDirectoryName(SpecificationsFile));
                 File.WriteAllLines(SpecificationsFile, lines);
             }
             catch (IOException) { referenceStatus.Text = "保存失败"; return; }
             catch (UnauthorizedAccessException) { referenceStatus.Text = "保存失败"; return; }
             ApplySpecInputs();
-            if (simulationOpen) simulatedScale.SetCount(simulationCount, appliedReferences);
+
             referenceStatus.Text = "已保存";
             UpdateOrderDisplay();
         }
 
         string OrdersFolder { get { return Path.Combine(DataFolder, demoScale.Checked ? "packing-demo" : "packing-live"); } }
 
+        async System.Threading.Tasks.Task ImportBoxPhoto()
+        {
+            if (importingLabel || choosingOrder) return;
+            string filename;
+            using (var picker = new OpenFileDialog { Title = "上传泡沫箱标签照片",
+                Filter = "标签照片|*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff", CheckFileExists = true,
+                RestoreDirectory = true })
+            {
+                if (picker.ShowDialog(this) != DialogResult.OK) return;
+                filename = picker.FileName;
+            }
+            importingLabel = choosingOrder = true;
+            captureStatus.Text = "正在读取标签照片";
+            try
+            {
+                var labels = await LabelPhoto.ReadAsync(filename);
+                if (closing || IsDisposed) return;
+                if (labels.Length == 0)
+                {
+                    MessageBox.Show(this, "未匹配到完整的规格和数量。请拍清标签，或手动录入。");
+                    return;
+                }
+                EditOrder(labels, filename);
+            }
+            catch (Exception ex)
+            {
+                if (!closing) MessageBox.Show(this, ex.Message, "标签识别失败");
+            }
+            finally
+            {
+                importingLabel = choosingOrder = false;
+            }
+        }
+
         void OpenOrder()
         {
-            using (var form = new Form { Text = "手动扫码 / 装箱工单", StartPosition = FormStartPosition.CenterParent,
+            EditOrder(new LabelSpec[0]);
+        }
+
+        void EditOrder(LabelSpec[] labels, string photo = null)
+        {
+            using (var form = new Form { Text = labels.Length == 0 ? "手动扫码 / 装箱工单" : "核对标签识别结果", StartPosition = FormStartPosition.CenterParent,
                 FormBorderStyle = FormBorderStyle.FixedDialog, ClientSize = new Size(366, 302),
                 MaximizeBox = false, MinimizeBox = false, Font = new Font(Font.FontFamily, 17, FontStyle.Regular, GraphicsUnit.Pixel),
                 BackColor = PanelColor, ForeColor = Ink })
             {
-                var code = new TextBox { Width = 231, MaxLength = 60, BackColor = Surface, ForeColor = Ink };
+                var code = new TextBox { Width = 231, MaxLength = 60, BackColor = Surface, ForeColor = Ink,
+                    Text = labels.Length == 0 ? "" : "BX-" + DateTime.Now.ToString("yyyyMMdd-HHmmssfff") };
                 var inputs = Enumerable.Range(0, 4).Select(i => Amount(0, 0, 0, 10000, 1)).ToArray();
                 var grid = Card(7);
                 Rows(grid, 40, 28, 34, 34, 34, 34, 44);
                 grid.Controls.Add(Line(Note("箱码"), code), 0, 0);
-                grid.Controls.Add(Note("可用键盘式扫码枪。输入箱码后读取已有目标。"), 0, 1);
-                for (int i = 0; i < 4; i++) grid.Controls.Add(Line(ColorLabel(i), inputs[i], Note("只")), 0, i + 2);
+                grid.Controls.Add(Note(labels.Length == 0 ? "可用键盘式扫码枪。输入箱码后读取目标。" :
+                    "已匹配 " + labels.Length + " 个绳色，请核对后启用。"), 0, 1);
+                for (int i = 0; i < 4; i++)
+                {
+                    LabelSpec spec = labels.FirstOrDefault(entry => entry.Color == i);
+                    if (spec != null) inputs[i].Value = spec.Quantity;
+                    grid.Controls.Add(Line(ColorLabel(i), inputs[i], Note("只"),
+                        Note(spec == null ? "" : spec.Name)), 0, i + 2);
+                }
                 var open = ActionButton("启用工单");
                 var read = ActionButton("读取目标");
                 grid.Controls.Add(Line(read, open), 0, 6);
@@ -1023,12 +1138,13 @@ namespace CrabWeighing
                     }
                     catch (Exception ex) { MessageBox.Show(form, ex.Message, "读取工单失败"); }
                 };
+                read.Visible = labels.Length == 0;
                 read.Click += (s, e) => load();
                 code.KeyDown += (s, e) =>
                 {
                     if (e.KeyCode != Keys.Enter) return;
                     e.SuppressKeyPress = true;
-                    load();
+                    if (labels.Length == 0) load();
                     inputs[0].Focus();
                 };
                 open.Click += (s, e) =>
@@ -1037,7 +1153,25 @@ namespace CrabWeighing
                     {
                         var selected = new PackingOrder(OrdersFolder, code.Text.Trim(), inputs.Select(input => (int)input.Value).ToArray());
                         selected.SaveGoals();
+                        if (labels.Length > 0)
+                        {
+                            var specLines = Enumerable.Range(0, 4).Select(i =>
+                            {
+                                var label = labels.FirstOrDefault(item => item.Color == i);
+                                return (label == null ? savedNames[i] : label.Name) + "\t" +
+                                    (label == null ? savedMinimum[i] : (double)label.Minimum).ToString(CultureInfo.InvariantCulture) + "\t" +
+                                    (label == null ? savedMaximum[i] : (double)label.Maximum).ToString(CultureInfo.InvariantCulture);
+                            });
+                            File.WriteAllLines(Path.Combine(selected.Folder, "packing-specs.tsv"), specLines);
+                            using (Image image = Image.FromFile(photo))
+                            using (var previewImage = new Bitmap(image, 160, Math.Max(1, image.Height * 160 / image.Width)))
+                                previewImage.Save(Path.Combine(selected.Folder, "box-label.jpg"), System.Drawing.Imaging.ImageFormat.Jpeg);
+                        }
                         order = selected;
+                        displayedLabelPath = null;
+                        ReloadSpecifications();
+                        lastUnclassifiedWeight = double.NaN;
+                        unclassifiedMoves = 0;
                         baselineFrame = null;
                         ResetCandidates();
                         LoadLedger();
@@ -1053,6 +1187,9 @@ namespace CrabWeighing
         void ResetOrder()
         {
             order = null;
+            ReloadSpecifications();
+            lastUnclassifiedWeight = double.NaN;
+            unclassifiedMoves = 0;
             baselineFrame = null;
             ResetCandidates();
             LoadLedger();
@@ -1084,10 +1221,29 @@ namespace CrabWeighing
                 grams.ToString("F1"), Percent(applied, goal) };
             summary.SetRows(values);
             overallProgress.SetProgress(applied, goal);
+            string labelPath = order == null ? null : Path.Combine(order.Folder, "box-label.jpg");
+            if (labelPath != displayedLabelPath)
+            {
+                displayedLabelPath = labelPath;
+                boxMark.SetPhoto(ReadLabelThumbnail(labelPath));
+            }
             taskCode.Text = order == null ? "未选择工单" : order.Code;
             taskState.Text = order == null ? "" : order.IsComplete ? "任务已完成" : "配单进行中";
             taskState.ForeColor = RopeInk[1];
             taskState.Visible = order != null;
+        }
+
+        static Image ReadLabelThumbnail(string path)
+        {
+            if (path == null || !File.Exists(path)) return null;
+            try
+            {
+                using (Image image = Image.FromFile(path)) return new Bitmap(image);
+            }
+            catch (IOException) { return null; }
+            catch (ArgumentException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+            catch (OutOfMemoryException) { return null; }
         }
 
         static string Percent(int numerator, int denominator)
@@ -1100,16 +1256,30 @@ namespace CrabWeighing
             if (choosingOrder) return;
             if (order == null) { captureStatus.Text = "请先扫码选择工单"; return; }
             if (!automatic.Checked) { captureStatus.Text = "自动记录已暂停"; ResetCandidates(); return; }
-            if (weight == null || !weight.Valid || !weight.Stable || stableObservation == null ||
-                frameTick == 0 || CaptureGate.Elapsed(now, frameTick) > 0.65)
-            {
-                ResetCandidates();
-                captureStatus.Text = "等待稳定画面与净重";
-                return;
-            }
-            if (camera.Source == CameraSource.Demo && !simulationOpen)
+            if (camera != null && camera.Source == CameraSource.Demo && !simulationOpen)
             {
                 captureStatus.Text = "演示画面需要模拟秤";
+                ResetCandidates();
+                return;
+            }
+            if (weight == null || !weight.Valid || !weight.Stable)
+            {
+                ResetCandidates();
+                captureStatus.Text = "等待净重稳定";
+                return;
+            }
+            if (weightCandidateSince == 0 || Math.Abs(weight.Value - weightCandidate) > WeightTolerance)
+            {
+                weightCandidateSince = now;
+                weightCandidate = weight.Value;
+            }
+
+            bool fresh = stableObservation != null && frameTick != 0 && CaptureGate.Elapsed(now, frameTick) <= 0.65;
+            if (!fresh)
+            {
+                candidateKey = null;
+                captureStatus.Text = foundBox.IsEmpty ? "寻找白色泡沫箱" : "等待箱内画面稳定";
+                TryRecordUnclassified(now, weight);
                 return;
             }
 
@@ -1132,20 +1302,21 @@ namespace CrabWeighing
                 CaptureGate.Elapsed(now, candidateSince) < 0.7)
             {
                 captureStatus.Text = "确认取放动作中";
+                TryRecordUnclassified(now, weight);
                 return;
             }
+
             int[] counts = stableObservation.Counts;
             if (baselineFrame == null)
             {
-                double expected = order.Moves.Count == 0 ? 0 : order.Moves[order.Moves.Count - 1].Weight;
+                var confirmed = order.Moves.LastOrDefault(item => item.Color >= 0);
+                double expected = confirmed == null ? 0 : confirmed.Weight;
                 if (!counts.SequenceEqual(order.Counts) || Math.Abs(weight.Value - expected) > EmptyLimit)
                 {
-                    captureStatus.Text = order.Moves.Count == 0 ? "请放空箱并去皮" : "请将原箱放回并核对净重";
+                    captureStatus.Text = confirmed == null ? "请放空箱并去皮" : "请将原箱放回并核对净重";
                     return;
                 }
-                baselineFrame = analyzed;
-                baselineCounts = (int[])counts.Clone();
-                baselineWeight = weight.Value;
+                AcceptBaseline(counts, weight.Value);
                 captureStatus.Text = "已就绪";
                 return;
             }
@@ -1154,14 +1325,29 @@ namespace CrabWeighing
             {
                 if (Math.Abs(weight.Value - baselineWeight) <= WeightTolerance)
                 {
-                    baselineFrame = analyzed;
-                    captureStatus.Text = "等待放入或取出";
+                    if (unclassifiedMoves > 0) TryRecordUnclassified(now, weight);
+                    if (unclassifiedMoves == 0 || Math.Abs(lastUnclassifiedWeight - weight.Value) <= WeightTolerance)
+                    {
+                        AcceptBaseline(counts, weight.Value);
+                        captureStatus.Text = "等待放入或取出";
+                    }
                 }
-                else captureStatus.Text = "净重已变，等待画面确认";
+                else
+                {
+                    captureStatus.Text = "净重已变，等待画面确认";
+                    TryRecordUnclassified(now, weight);
+                }
                 return;
             }
+
             PackingMove move = PackingMove.Detect(baselineCounts, counts, baselineWeight, weight.Value, WeightTolerance);
-            if (move == null) { captureStatus.Text = "请分绳色逐次取放"; return; }
+            bool resolve = unclassifiedMoves == 1 && Math.Abs(lastUnclassifiedWeight - weight.Value) <= WeightTolerance;
+            if (move == null || (unclassifiedMoves != 0 && !resolve))
+            {
+                captureStatus.Text = unclassifiedMoves == 0 ? "等待确认绳色" : "请核对待确认记录";
+                TryRecordUnclassified(now, weight);
+                return;
+            }
             if (CaptureGate.Elapsed(now, lastWriteAttempt) < 1) return;
             lastWriteAttempt = now;
             double perCrab = Math.Abs(move.Delta / move.Count);
@@ -1170,17 +1356,49 @@ namespace CrabWeighing
             try
             {
                 SaveSnapshots(move, analyzed, stableObservation);
+                if (resolve) order.ResolveLast(move);
+                else order.Append(move);
+            }
+            catch (IOException) { captureStatus.Text = "记录保存失败"; return; }
+            catch (UnauthorizedAccessException) { captureStatus.Text = "记录保存失败"; return; }
+            catch (System.Runtime.InteropServices.ExternalException) { captureStatus.Text = "快照保存失败"; return; }
+            AcceptBaseline(counts, weight.Value);
+            if (resolve) LoadLedger();
+            else AddMoveRow(move);
+            UpdateOrderDisplay();
+            captureStatus.Text = move.OutsideRange ? "已记录 · 单只均重超规格范围" : "已保存取放记录";
+        }
+
+        void AcceptBaseline(int[] counts, double weight)
+        {
+            baselineFrame = analyzed;
+            baselineCounts = (int[])counts.Clone();
+            baselineWeight = weight;
+            lastUnclassifiedWeight = double.NaN;
+            unclassifiedMoves = 0;
+        }
+
+        void TryRecordUnclassified(long now, WeightSample weight)
+        {
+            if (baselineFrame == null || CaptureGate.Elapsed(now, weightCandidateSince) < 2.2 ||
+                CaptureGate.Elapsed(now, lastWriteAttempt) < 1) return;
+            double reference = unclassifiedMoves == 0 ? baselineWeight : lastUnclassifiedWeight;
+            if (Math.Abs(weight.Value - reference) <= WeightTolerance) return;
+            lastWriteAttempt = now;
+            var move = new PackingMove { Time = DateTimeOffset.Now, Color = -1, Delta = weight.Value - reference,
+                Weight = weight.Value, Spec = "待确认", Before = "", After = "", Target = "" };
+            try
+            {
+                if (displayed != null) SaveSnapshots(move, displayed, null);
                 order.Append(move);
             }
             catch (IOException) { captureStatus.Text = "记录保存失败"; return; }
             catch (UnauthorizedAccessException) { captureStatus.Text = "记录保存失败"; return; }
             catch (System.Runtime.InteropServices.ExternalException) { captureStatus.Text = "快照保存失败"; return; }
-            baselineFrame = analyzed;
-            baselineCounts = (int[])counts.Clone();
-            baselineWeight = weight.Value;
+            lastUnclassifiedWeight = weight.Value;
+            unclassifiedMoves++;
             AddMoveRow(move);
-            UpdateOrderDisplay();
-            captureStatus.Text = move.OutsideRange ? "已记录 · 单只均重超规格范围" : "已保存取放记录";
+            captureStatus.Text = "已记净重 · 绳色待确认";
         }
 
         void SaveSnapshots(PackingMove move, VideoFrame frame, CrabObservation after)
@@ -1196,8 +1414,13 @@ namespace CrabWeighing
             {
                 before.Save(Path.Combine(directory, move.Before), System.Drawing.Imaging.ImageFormat.Jpeg);
                 current.Save(Path.Combine(directory, move.After), System.Drawing.Imaging.ImageFormat.Jpeg);
+                if (move.Color < 0 || after == null)
+                {
+                    move.Target = "";
+                    return;
+                }
                 bool addition = move.Count > 0;
-                CrabObservation prior = CrabVision.Read(baselineFrame, area, 0.12);
+                CrabObservation prior = CrabVision.Read(baselineFrame, FoamBox.Find(baselineFrame, area), 0.12);
                 var present = (addition ? after : prior).Targets.Where(target => target.ColorIndex == move.Color);
                 var other = (addition ? prior : after).Targets.Where(target => target.ColorIndex == move.Color).ToArray();
                 CrabTarget focus = present.OrderByDescending(target => other.Select(candidate =>
@@ -1252,15 +1475,15 @@ namespace CrabWeighing
         void AddMoveRow(PackingMove move)
         {
             var row = new DataGridViewRow();
-            row.CreateCells(ledger, move.Count > 0 ? "放入" : "取出", LoadSnapshot(move.Before, true),
+            row.CreateCells(ledger, move.Delta > 0 ? "放入" : "取出", LoadSnapshot(move.Before, true),
                 LoadSnapshot(move.After, true), LoadSnapshot(move.Target, true),
-                move.Delta.ToString("+0.0;-0.0"), move.Weight.ToString("F1"), Basket.Colors[move.Color],
-                move.Spec + " × " + move.Count + (move.OutsideRange ? " !" : ""));
+                move.Delta.ToString("+0.0;-0.0"), move.Weight.ToString("F1"), move.Color < 0 ? "待确认" : Basket.Colors[move.Color],
+                move.Color < 0 ? "—" : move.Spec + " × " + move.Count + (move.OutsideRange ? " !" : ""));
             row.Height = ledger.RowTemplate.Height;
             row.Tag = move;
-            row.Cells[0].Style.ForeColor = move.Count > 0 ? RopeInk[1] : RopeInk[0];
+            row.Cells[0].Style.ForeColor = move.Delta > 0 ? RopeInk[1] : RopeInk[0];
             row.Cells[4].Style.ForeColor = row.Cells[0].Style.ForeColor;
-            row.Cells[6].Style.ForeColor = RopeInk[move.Color];
+            row.Cells[6].Style.ForeColor = move.Color < 0 ? Muted : RopeInk[move.Color];
             row.Cells[7].ToolTipText = move.Time.ToString("yyyy-MM-dd HH:mm:ss") + (move.OutsideRange ? " · 超规格范围" : "");
             ledger.Rows.Insert(0, row);
             if (ledger.Rows.Count <= 200) return;
@@ -1350,12 +1573,17 @@ namespace CrabWeighing
                     TextRenderer.DrawText(e.Graphics, "识别耗时 " + inferenceMs.ToString("F1") + " ms",
                         Font, telemetry, RopeInk[1], Surface, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
                     ConsolePaint.Dot(e.Graphics, px(12), preview.Height - px(22), px(7), RopeInk[1]);
-                    TextRenderer.DrawText(e.Graphics, "绳色检测运行中", Font, new Point(px(25), preview.Height - px(29)), RopeInk[1], Surface);
+                    TextRenderer.DrawText(e.Graphics, foundBox.IsEmpty ? "寻找白色泡沫箱" : "箱内绳色识别中",
+                        Font, new Point(px(25), preview.Height - px(29)), RopeInk[1], Surface);
                 }
             }
             else TextRenderer.DrawText(e.Graphics, info, Font, new Point(px(10), px(9)), Cyan, Surface);
             if (displayed == null) return;
             Rectangle bounds = preview.FrameBounds;
+            if (!foundBox.IsEmpty && !selectionStart.HasValue)
+            {
+                using (var pen = new Pen(Cyan, px(2))) e.Graphics.DrawRectangle(pen, OnPreview(foundBox, bounds));
+            }
             if (!selectionStart.HasValue && latestObservation != null)
             {
                 foreach (CrabTarget target in latestObservation.Targets)
@@ -1384,11 +1612,13 @@ namespace CrabWeighing
         void ResetCandidates()
         {
             candidateKey = null;
+            weightCandidateSince = 0;
         }
 
         void InvalidateAnalysis()
         {
             analyzed = null;
+            foundBox = previousBox = Rectangle.Empty;
             latestObservation = null;
             stableObservation = null;
             matchingFrames = 0;

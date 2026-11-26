@@ -68,9 +68,32 @@ namespace CrabWeighing
 
     sealed class BoxMark : Control
     {
+        Image photo;
+
+        public void SetPhoto(Image image)
+        {
+            if (photo != null) photo.Dispose();
+            photo = image;
+            Invalidate();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && photo != null) photo.Dispose();
+            base.Dispose(disposing);
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             ConsolePaint.Tile(e.Graphics, ClientRectangle, 4, Color.FromArgb(224, 238, 247), Color.FromArgb(184, 202, 219));
+            if (photo != null)
+            {
+                double ratio = Math.Min((Width - 8) / (double)photo.Width, (Height - 8) / (double)photo.Height);
+                int width = (int)(photo.Width * ratio), height = (int)(photo.Height * ratio);
+                e.Graphics.DrawImage(photo, (Width - width) / 2, (Height - height) / 2, width, height);
+                base.OnPaint(e);
+                return;
+            }
             using (var pen = new Pen(Color.FromArgb(17, 48, 67), 2))
             {
                 int left = 10, top = 10, right = Width - 11, bottom = Height - 11;
