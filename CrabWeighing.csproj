@@ -39,6 +39,7 @@
     <Compile Include="CrabVision.cs" />
     <Compile Include="Packing.cs" />
     <Compile Include="DashboardControls.cs" />
+    <Compile Include="ConsoleLayout.cs" />
     <None Include="README.md" />
     <None Include="app.manifest" />
     <Content Include="vendor\SensorDll.dll" Condition="Exists('vendor\SensorDll.dll')">
