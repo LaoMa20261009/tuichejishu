@@ -9,24 +9,25 @@ using System.Windows.Forms;
 
 namespace CrabWeighing
 {
-    sealed class MainForm : Form
+    sealed partial class MainForm : Form
     {
-        static readonly Color Ink = Color.FromArgb(235, 241, 250);
-        static readonly Color Blue = Color.FromArgb(36, 101, 232);
-        static readonly Color Cyan = Color.FromArgb(34, 211, 238);
-        static readonly Color PanelColor = Color.FromArgb(17, 24, 41);
-        static readonly Color Surface = Color.FromArgb(11, 17, 28);
-        static readonly Color Border = Color.FromArgb(47, 61, 80);
-        static readonly Color Muted = Color.FromArgb(154, 170, 190);
-        static readonly Color[] RopeInk = { Color.FromArgb(252, 122, 147), Color.FromArgb(67, 219, 168),
-            Color.FromArgb(111, 167, 255), Color.FromArgb(232, 239, 250) };
-        static readonly Color[] RopeFill = { Color.FromArgb(38, 23, 41), Color.FromArgb(14, 35, 43),
-            Color.FromArgb(20, 31, 62), Color.FromArgb(28, 37, 54) };
+        static readonly Color Ink = Color.FromArgb(11, 28, 48);
+        static readonly Color Blue = Color.FromArgb(0, 97, 148);
+        static readonly Color Cyan = Color.FromArgb(2, 132, 199);
+        static readonly Color PanelColor = Color.White;
+        static readonly Color Surface = Color.FromArgb(245, 248, 255);
+        static readonly Color Border = Color.FromArgb(213, 226, 245);
+        static readonly Color Muted = Color.FromArgb(81, 95, 116);
+        static readonly Color Green = Color.FromArgb(0, 105, 71);
+        static readonly Color[] RopeInk = { Color.FromArgb(185, 28, 28), Green, Blue,
+            Color.FromArgb(86, 106, 135), Color.FromArgb(137, 91, 0) };
+        static readonly Color[] RopeFill = { Color.FromArgb(255, 233, 230), Color.FromArgb(223, 247, 235),
+            Color.FromArgb(228, 241, 255), Color.FromArgb(235, 241, 250), Color.FromArgb(255, 246, 213) };
         static readonly int[] DemoColors = { 0, 1, 2, 3, 1, 3, 2, 0 };
         static readonly int[] DemoChanges = { 1, 2, 3, 4, -2, -4, -3, -1 };
-        static readonly string[] DefaultNames = { "2.0两母", "2.5两母", "3.0两公", "统货标准" };
-        static readonly int[] DefaultMin = { 90, 115, 140, 80 };
-        static readonly int[] DefaultMax = { 110, 135, 160, 95 };
+        static readonly string[] DefaultNames = { "2.5两母蟹", "3.0两母蟹", "蓝绳蟹", "3.5两母蟹", "黄绳蟹" };
+        static readonly int[] DefaultMin = { 115, 140, 140, 165, 100 };
+        static readonly int[] DefaultMax = { 135, 160, 160, 185, 120 };
 
         readonly VideoSurface preview = new VideoSurface();
         readonly ComboBox cameraType = Choice("网络视频", "USB 摄像头", "本地视频", "演示画面");
@@ -37,18 +38,12 @@ namespace CrabWeighing
         readonly Label cameraStatus = Note("视频未连接");
         readonly Label referenceStatus = Note("");
         double[] appliedReferences;
-        readonly TextBox[] productNames = new TextBox[4];
-        readonly TextBox[] minimumWeights = new TextBox[4];
-        readonly TextBox[] maximumWeights = new TextBox[4];
+        readonly TextBox[] productNames = new TextBox[Basket.Colors.Length];
+        readonly TextBox[] minimumWeights = new TextBox[Basket.Colors.Length];
+        readonly TextBox[] maximumWeights = new TextBox[Basket.Colors.Length];
         string[] savedNames;
         double[] savedMinimum, savedMaximum;
         readonly Label deviceStatus = Note("");
-        readonly BoxMark boxMark = new BoxMark { BackColor = Surface, AccessibleName = "上传泡沫箱标签照片", Cursor = Cursors.Hand };
-        readonly Label taskCode = Note("未选择工单");
-        readonly Label taskState = Note("");
-        readonly OverallProgress overallProgress = new OverallProgress();
-        readonly TaskMeter[] meters = new TaskMeter[4];
-        readonly PackingSummary summary = new PackingSummary(RopeInk);
         readonly DataGridView ledger = new DataGridView();
         readonly Button tareButton = ActionButton("去皮");
         PackingOrder order;
@@ -75,7 +70,7 @@ namespace CrabWeighing
         Control dragControl;
         Point dragOffset;
         readonly SimulatedScale simulatedScale = new SimulatedScale();
-        readonly Label weightValue = new WeightReadout { Text = "—" };
+        readonly Label weightValue = Note("—");
         readonly Label scaleStatus = Note("秤未连接");
         readonly Label captureStatus = Note("等待视频与称重数据");
         readonly CheckBox automatic = new CheckBox { Text = "自动记录", Checked = true, AutoSize = true, Margin = new Padding(8, 7, 4, 3) };
@@ -98,7 +93,6 @@ namespace CrabWeighing
         volatile int[] simulationColors = new int[0];
         Rectangle foundBox, previousBox;
         bool importingLabel;
-        string displayedLabelPath;
         int demoStep;
         long weightCandidateSince;
         double weightCandidate;
@@ -118,7 +112,8 @@ namespace CrabWeighing
 
         public MainForm()
         {
-            Text = "螃蟹称重计数";
+            Text = "螃蟹装箱计数系统";
+            KeyPreview = true;
             AutoSize = false;
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None;
@@ -146,14 +141,10 @@ namespace CrabWeighing
             browseVideo.ForeColor = Color.White;
 
             SuspendLayout();
-            Place(CreateBanner(), 0, 0, 1280, 53);
-            Place(CreateVideoPanel(), 11, 63, 590, 497);
-            Place(CreateVideoToolbar(), 11, 568, 590, 46);
-            Place(CreateScalePanel(), 11, 622, 210, 167);
-            Place(CreateReferencePanel(), 229, 622, 372, 167);
-            Place(CreateOrderPanel(), 611, 63, 658, 153);
-            Place(CreateBasketPanel(), 611, 224, 658, 201);
-            Place(CreateRecordsPanel(), 611, 435, 658, 354);
+            Place(CreateBanner(), 0, 0, 1280, 59);
+            Place(CreateLabelPage(), 14, 70, 1252, 716);
+            Place(CreatePackingPage(), 14, 70, 1252, 716);
+            CreateSettingsContent();
             ResumeLayout(true);
             float factor = openingBounds.Width / (float)ConsoleLayout.DesignSize.Width;
             if (Math.Abs(factor - 1) > 0.001F)
@@ -201,21 +192,11 @@ namespace CrabWeighing
                 UpdateDemoCount();
                 nextDemoStep = Stopwatch.GetTimestamp() + 4 * Stopwatch.Frequency;
             };
+            LoadSettings();
             LoadReferences();
             ApplySpecInputs();
             automatic.CheckedChanged += (s, e) => ResetCandidates();
-            tareButton.Click += (s, e) =>
-            {
-                if (currentWeight == null || !currentWeight.Valid || !currentWeight.Stable) return;
-                if (order != null && order.Counts.Sum() != 0)
-                {
-                    MessageBox.Show(this, "当前工单已有装箱数量，请先将箱内螃蟹取出。");
-                    return;
-                }
-                tare += currentWeight.Value;
-                baselineFrame = null;
-                ResetCandidates();
-            };
+            tareButton.Click += (s, e) => AdjustScaleZero(true);
             preview.Paint += DrawArea;
             preview.MouseDown += BeginSelection;
             preview.MouseMove += MoveSelection;
@@ -224,7 +205,7 @@ namespace CrabWeighing
             RefreshPorts();
             UpdateCameraInputs();
             UpdateScaleInputs();
-            UpdateOrderDisplay();
+            ShowPackingPage(false);
             timer.Start();
         }
 
@@ -334,289 +315,6 @@ namespace CrabWeighing
             Controls.Add(control);
         }
 
-        Control CreateBanner()
-        {
-            var panel = new Panel { BackColor = PanelColor };
-            var icon = new Label { Font = new Font("Segoe UI Symbol", 23, FontStyle.Regular, GraphicsUnit.Pixel) };
-            icon.Paint += (s, e) =>
-            {
-                ConsolePaint.Tile(e.Graphics, icon.ClientRectangle, 5, Color.FromArgb(12, 49, 68), Color.FromArgb(16, 106, 132));
-                TextRenderer.DrawText(e.Graphics, "☼", icon.Font, icon.ClientRectangle, Cyan,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-            };
-            icon.SetBounds(17, 9, 34, 34);
-            var title = Heading("螃蟹称重计数");
-            title.Font = new Font(Font.FontFamily, 26, FontStyle.Bold, GraphicsUnit.Pixel);
-            title.ForeColor = Color.White;
-            title.Location = new Point(61, 10);
-            var minimize = ActionButton("—");
-            var close = ActionButton("×");
-            close.ForeColor = RopeInk[0];
-            minimize.AutoSize = close.AutoSize = false;
-            minimize.Click += (s, e) => WindowState = FormWindowState.Minimized;
-            close.Click += (s, e) => Close();
-            hints.SetToolTip(minimize, "最小化");
-            hints.SetToolTip(close, "关闭");
-            minimize.AccessibleName = "最小化";
-            close.AccessibleName = "关闭";
-            var deviceRail = new Panel { BackColor = PanelColor };
-            deviceRail.Paint += (s, e) => ConsolePaint.Tile(e.Graphics, deviceRail.ClientRectangle, 5, Surface, Border);
-            deviceStatus.BackColor = Surface;
-            deviceRail.Controls.Add(deviceStatus);
-            panel.Controls.AddRange(new Control[] { icon, title, deviceRail, minimize, close });
-            deviceStatus.AutoSize = false;
-            deviceStatus.TextAlign = ContentAlignment.MiddleRight;
-            // Design-space bounds are scaled along with the rest of the banner.
-            deviceRail.SetBounds(770, 10, 407, 32);
-            deviceStatus.SetBounds(6, 2, 396, 27);
-            minimize.SetBounds(1192, 9, 34, 34);
-            close.SetBounds(1234, 9, 34, 34);
-            foreach (Control surface in new Control[] { panel, icon, title, deviceRail, deviceStatus })
-                EnableWindowDrag(surface);
-            hints.SetToolTip(panel, "拖动标题栏移动窗口");
-            return panel;
-        }
-
-        Control CreateVideoPanel()
-        {
-            var panel = Card(1);
-            panel.Padding = new Padding(1);
-            panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            preview.Dock = DockStyle.Fill;
-            preview.Margin = Padding.Empty;
-            preview.BackColor = Color.FromArgb(8, 12, 19);
-            preview.Cursor = Cursors.Cross;
-            panel.Controls.Add(preview, 0, 0);
-            hints.SetToolTip(preview, "拖动框选装箱区域。识别仅在选区内运行。");
-            return panel;
-        }
-
-        Control CreateVideoToolbar()
-        {
-            var panel = Card(1);
-            panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            var reset = ActionButton("全画面");
-            reset.AutoSize = false;
-            reset.Width = 72;
-            reset.Click += (s, e) =>
-            {
-                area = new Rectangle(0, 0, VideoFrame.Width, VideoFrame.Height);
-                InvalidateAnalysis();
-            };
-            panel.Controls.Add(Line(Note("输入源"), cameraType, address, browseVideo, cameraButton, reset), 0, 0);
-            return panel;
-        }
-
-        Control CreateScalePanel()
-        {
-            var panel = Card(4);
-            Rows(panel, 29, 27, 56, 37);
-            panel.Font = new Font(Font.FontFamily, 14, FontStyle.Regular, GraphicsUnit.Pixel);
-            scaleButton.Text = "连接";
-            panel.Controls.Add(SectionHeading("称重", Cyan, demoScale, scaleButton), 0, 0);
-            ports.Width = 83;
-            protocol.Width = 94;
-            serialControls = Line(ports, protocol);
-            crabCount.Width = 48;
-            simulationControls = Line(cycleLoads, crabCount);
-            var options = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
-            options.Controls.AddRange(new Control[] { serialControls, simulationControls });
-            panel.Controls.Add(options, 0, 1);
-            weightValue.Font = new Font("Consolas", 28, FontStyle.Bold, GraphicsUnit.Pixel);
-            weightValue.ForeColor = Cyan;
-            weightValue.AutoSize = false;
-            weightValue.Dock = DockStyle.Fill;
-            weightValue.Margin = new Padding(0, 2, 0, 1);
-            weightValue.AccessibleName = "实时净重";
-            panel.Controls.Add(weightValue, 0, 2);
-            panel.Controls.Add(SectionHeading("", Cyan, tareButton), 0, 3);
-            var footer = (Panel)panel.GetControlFromPosition(0, 3);
-            scaleStatus.AutoSize = false;
-            scaleStatus.SetBounds(5, 5, 116, 27);
-            scaleStatus.TextAlign = ContentAlignment.MiddleLeft;
-            footer.Controls.Add(scaleStatus);
-            return panel;
-        }
-
-        Control CreateReferencePanel()
-        {
-            var panel = Card(5);
-            Rows(panel, 34, 28, 28, 28, 28);
-            var save = ActionButton("保存");
-            save.BackColor = Blue;
-            save.ForeColor = Color.White;
-            save.Click += (s, e) => SaveSpecifications();
-            panel.Controls.Add(SectionHeading("绳色规格配置", Cyan, referenceStatus, save), 0, 0);
-            for (int i = 0; i < Basket.Colors.Length; i++)
-            {
-                productNames[i] = new TextBox { Text = DefaultNames[i], Width = 77, MaxLength = 18, BorderStyle = BorderStyle.FixedSingle };
-                minimumWeights[i] = WeightInput(DefaultMin[i]);
-                maximumWeights[i] = WeightInput(DefaultMax[i]);
-                var nameLabel = Note("名称");
-                var rangeLabel = Note("范围");
-                var rangeUnit = Note("g");
-                nameLabel.Font = rangeLabel.Font = rangeUnit.Font =
-                    new Font(Font.FontFamily, 13, FontStyle.Regular, GraphicsUnit.Pixel);
-                var line = Line(ColorLabel(i), nameLabel, productNames[i], rangeLabel, minimumWeights[i],
-                    Note("~"), maximumWeights[i], rangeUnit);
-                foreach (Control item in line.Controls) item.Margin = new Padding(2, 2, 2, 2);
-                line.BackColor = RopeFill[i];
-                line.Margin = new Padding(0, 1, 0, 1);
-                Color outline = ControlPaint.Dark(RopeInk[i], 0.5F);
-                line.Paint += (sender, e) =>
-                {
-                    if (line.Width > 1 && line.Height > 1)
-                        using (var pen = new Pen(outline)) e.Graphics.DrawRectangle(pen, 0, 0, line.Width - 1, line.Height - 1);
-                };
-                productNames[i].BackColor = Surface;
-                productNames[i].ForeColor = Ink;
-                panel.Controls.Add(line, 0, i + 1);
-            }
-            return panel;
-        }
-
-        Control CreateOrderPanel()
-        {
-            var panel = Card(5);
-            Rows(panel, 32, 24, 24, 24, 24);
-            var scan = ActionButton("▦  手动扫码");
-            scan.Click += (s, e) =>
-            {
-                choosingOrder = true;
-                try { OpenOrder(); }
-                finally { choosingOrder = false; }
-            };
-            var header = SectionHeading("装箱任务工单", Cyan, automatic, scan);
-            panel.Controls.Add(header, 0, 0);
-            var detail = Columns(2);
-            detail.ColumnStyles.Clear();
-            detail.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 184));
-            detail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            var box = new Panel { Dock = DockStyle.Fill, BackColor = PanelColor, Margin = new Padding(0, 4, 9, 0) };
-            box.Paint += (sender, e) => ConsolePaint.Tile(e.Graphics, box.ClientRectangle, 5, Surface, Color.FromArgb(19, 80, 101));
-            boxMark.Click += async (s, e) => await ImportBoxPhoto();
-            hints.SetToolTip(boxMark, "点击上传泡沫箱标签照片");
-            boxMark.SetBounds(10, 25, 49, 49);
-            var icon = Heading("泡沫箱");
-            icon.Font = new Font(Font.FontFamily, 16, FontStyle.Bold, GraphicsUnit.Pixel);
-            icon.BackColor = Surface;
-            icon.Location = new Point(67, 14);
-            taskCode.AutoSize = false;
-            taskCode.AutoEllipsis = true;
-            taskCode.SetBounds(67, 37, 101, 22);
-            taskCode.TextAlign = ContentAlignment.MiddleLeft;
-            taskCode.Font = new Font("Consolas", 12, FontStyle.Bold, GraphicsUnit.Pixel);
-            taskCode.ForeColor = Cyan;
-            taskCode.BackColor = Surface;
-            taskState.Location = new Point(67, 65);
-            taskState.Padding = new Padding(5, 1, 5, 1);
-            taskState.Font = new Font(Font.FontFamily, 13, FontStyle.Bold, GraphicsUnit.Pixel);
-            taskState.BackColor = Color.FromArgb(9, 49, 48);
-            box.Controls.AddRange(new Control[] { boxMark, icon, taskCode, taskState });
-            detail.Controls.Add(box, 0, 0);
-            var bands = Columns(1);
-            bands.Margin = new Padding(0, 4, 0, 0);
-            bands.RowCount = 4;
-            for (int i = 0; i < 4; i++)
-            {
-                bands.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
-                meters[i] = new TaskMeter(RopeInk[i], RopeFill[i]) { Dock = DockStyle.Fill, Margin = new Padding(0, 1, 0, 1) };
-                bands.Controls.Add(meters[i], 0, i);
-            }
-            detail.Controls.Add(bands, 1, 0);
-            panel.Controls.Add(detail, 0, 1);
-            panel.SetRowSpan(detail, 4);
-            return panel;
-        }
-
-        Control CreateBasketPanel()
-        {
-            var panel = Card(2);
-            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            panel.Controls.Add(SectionHeading("装箱数量", Cyan), 0, 0);
-            var body = Columns(2);
-            body.ColumnStyles.Clear();
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 79));
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 21));
-            summary.Dock = DockStyle.Fill;
-            summary.Margin = Padding.Empty;
-            body.Controls.Add(summary, 0, 0);
-            overallProgress.Dock = DockStyle.Fill;
-            overallProgress.Margin = new Padding(9, 0, 0, 0);
-            overallProgress.BackColor = PanelColor;
-            body.Controls.Add(overallProgress, 1, 0);
-            panel.Controls.Add(body, 0, 1);
-            return panel;
-        }
-
-        static Label ColorLabel(int index)
-        {
-            var label = Note("● " + Basket.Colors[index]);
-            label.Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold, GraphicsUnit.Pixel);
-            label.ForeColor = RopeInk[index];
-            return label;
-        }
-
-        Control CreateRecordsPanel()
-        {
-            var panel = Card(2);
-            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-            panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            panel.Controls.Add(SectionHeading("取放螃蟹记录", RopeInk[1], captureStatus), 0, 0);
-            StyleGrid(ledger, 42);
-            ledger.ScrollBars = ScrollBars.Vertical;
-            AddColumn(ledger, "类型", 52);
-            AddImageColumn("放前图片", 67);
-            AddImageColumn("放后图片", 67);
-            AddImageColumn("螃蟹与绳子", 96);
-            AddColumn(ledger, "重量变化 g", 85);
-            AddColumn(ledger, "累计重量 g", 82);
-            AddColumn(ledger, "绳色", 53);
-            AddColumn(ledger, "规格数量", 100);
-            ledger.CellPainting += (s, e) =>
-            {
-                if (e.RowIndex < 0 || e.ColumnIndex < 0 || (e.ColumnIndex >= 1 && e.ColumnIndex <= 3)) return;
-                e.PaintBackground(e.ClipBounds, true);
-                var move = ledger.Rows[e.RowIndex].Tag as PackingMove;
-                if (move == null) return;
-                var textBounds = Rectangle.Inflate(e.CellBounds, -5, 0);
-                Color color = e.CellStyle.ForeColor;
-                if (e.ColumnIndex == 0)
-                {
-                    textBounds.Inflate(-ConsolePaint.Pixels(ledger, 2), -ConsolePaint.Pixels(ledger, 10));
-                    Color fill = move.Delta > 0 ? Color.FromArgb(9, 57, 50) : Color.FromArgb(65, 20, 36);
-                    ConsolePaint.Tile(e.Graphics, textBounds, 4, fill, ControlPaint.Dark(color, 0.32F));
-                }
-                if (e.ColumnIndex == 6)
-                {
-                    ConsolePaint.Dot(e.Graphics, textBounds.X, textBounds.Y + (textBounds.Height - 7) / 2, 7, color);
-                    textBounds.X += 10;
-                    textBounds.Width -= 10;
-                }
-                TextRenderer.DrawText(e.Graphics, Convert.ToString(e.Value, CultureInfo.InvariantCulture),
-                    e.CellStyle.Font ?? Font, textBounds, color, TextFormatFlags.HorizontalCenter |
-                    TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-                e.Paint(e.ClipBounds, DataGridViewPaintParts.Border);
-                e.Handled = true;
-            };
-            ledger.CellDoubleClick += (s, e) => ShowSnapshot(e.RowIndex, e.ColumnIndex);
-            panel.Controls.Add(ledger, 0, 1);
-            return panel;
-        }
-
-        void AddImageColumn(string label, int weight)
-        {
-            var column = new DataGridViewImageColumn { HeaderText = label, ImageLayout = DataGridViewImageCellLayout.Zoom, FillWeight = weight };
-            column.DefaultCellStyle.NullValue = null;
-            ledger.Columns.Add(column);
-        }
-
-        static void AddColumn(DataGridView grid, string label, int weight)
-        {
-            grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = label, FillWeight = weight, SortMode = DataGridViewColumnSortMode.NotSortable });
-        }
-
         static void StyleGrid(DataGridView grid, int rowHeight)
         {
             grid.Dock = DockStyle.Fill;
@@ -631,7 +329,7 @@ namespace CrabWeighing
             grid.GridColor = Border;
             grid.BorderStyle = BorderStyle.None;
             grid.EnableHeadersVisualStyles = false;
-            grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(22, 33, 52);
+            grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(232, 240, 253);
             grid.ColumnHeadersDefaultCellStyle.ForeColor = Ink;
             grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             grid.ColumnHeadersDefaultCellStyle.Font = new Font("Microsoft YaHei UI", 15, FontStyle.Bold, GraphicsUnit.Pixel);
@@ -641,7 +339,7 @@ namespace CrabWeighing
             grid.RowsDefaultCellStyle.ForeColor = Ink;
             grid.RowsDefaultCellStyle.BackColor = Surface;
             grid.AlternatingRowsDefaultCellStyle.ForeColor = Ink;
-            grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(14, 22, 36);
+            grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(249, 251, 255);
             grid.RowsDefaultCellStyle.SelectionForeColor = Ink;
             grid.RowsDefaultCellStyle.SelectionBackColor = Border;
             grid.RowTemplate.Height = rowHeight;
@@ -826,8 +524,12 @@ namespace CrabWeighing
                 now = Stopwatch.GetTimestamp();
                 long frameTick = RefreshVideo(now);
                 tareButton.Enabled = weight != null && weight.Valid && weight.Stable;
-                deviceStatus.Text = "电子秤  " + (simulationOpen ? "模拟" : scale.IsOpen ? ports.Text : "未连接") +
-                    "     视频  " + (camera == null ? "未连接" : cameraType.Text);
+                string scaleConnection = simulationOpen ? "模拟" : !scale.IsOpen ? "未连接" :
+                    ports.Text + (weight == null || !weight.Valid ? " · 待读数" : " · 在线");
+                string cameraConnection = camera == null ? "未连接" : camera.Ended ? "已停止" :
+                    displayed == null ? "等待画面" : cameraType.Text + " · 在线";
+                deviceStatus.Text = "电子秤  " + scaleConnection + "     工业相机  " + cameraConnection;
+                RefreshWorkflow(now, weight);
                 RefreshRecording(now, weight, frameTick);
             }
             finally { refreshing = false; }
@@ -852,7 +554,7 @@ namespace CrabWeighing
                 }
             }
 
-            if (simulationOpen && cycleLoads.Checked && camera != null)
+            if (simulationOpen && cycleLoads.Checked && camera != null && packingActive)
             {
                 if (camera.Source == CameraSource.Demo && now >= nextDemoStep)
                 {
@@ -864,9 +566,9 @@ namespace CrabWeighing
                 else if (camera.Source != CameraSource.Demo && stableObservation != null &&
                     matchingFrames >= 2 && analyzed != null && CaptureGate.Elapsed(now, analyzed.Tick) <= 0.65)
                 {
-                    int[] current = new int[4];
+                    int[] current = new int[Basket.Colors.Length];
                     foreach (int color in simulatedScale.Colors) current[color]++;
-                    int[] changed = Enumerable.Range(0, 4).Where(i => current[i] != stableObservation.Counts[i]).ToArray();
+                    int[] changed = Enumerable.Range(0, Basket.Colors.Length).Where(i => current[i] != stableObservation.Counts[i]).ToArray();
                     if (changed.Length == 1)
                     {
                         int color = changed[0];
@@ -975,11 +677,12 @@ namespace CrabWeighing
 
         void ReloadSpecifications()
         {
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < Basket.Colors.Length; i++)
             {
                 productNames[i].Text = DefaultNames[i];
                 minimumWeights[i].Text = DefaultMin[i].ToString(CultureInfo.CurrentCulture);
                 maximumWeights[i].Text = DefaultMax[i].ToString(CultureInfo.CurrentCulture);
+                ruleEnabled[i].Checked = true;
             }
             LoadReferences();
             ApplySpecInputs();
@@ -993,11 +696,11 @@ namespace CrabWeighing
                 if (!File.Exists(path)) path = Path.Combine(DataFolder, "packing-specs.tsv");
                 if (!File.Exists(path)) return;
                 string[] lines = File.ReadAllLines(path);
-                for (int i = 0; i < Math.Min(4, lines.Length); i++)
+                for (int i = 0; i < Math.Min(Basket.Colors.Length, lines.Length); i++)
                 {
                     string[] fields = lines[i].Split('\t');
                     decimal low, high;
-                    if (fields.Length == 3 && !string.IsNullOrWhiteSpace(fields[0]) &&
+                    if (fields.Length >= 3 && !string.IsNullOrWhiteSpace(fields[0]) &&
                         decimal.TryParse(fields[1], NumberStyles.Number, CultureInfo.InvariantCulture, out low) &&
                         decimal.TryParse(fields[2], NumberStyles.Number, CultureInfo.InvariantCulture, out high) &&
                         low >= 0 && high >= low && high <= 10000)
@@ -1005,6 +708,7 @@ namespace CrabWeighing
                         productNames[i].Text = fields[0];
                         minimumWeights[i].Text = low.ToString("0.#######", CultureInfo.CurrentCulture);
                         maximumWeights[i].Text = high.ToString("0.#######", CultureInfo.CurrentCulture);
+                        if (fields.Length >= 4) ruleEnabled[i].Checked = fields[3] != "0";
                     }
                 }
             }
@@ -1020,10 +724,10 @@ namespace CrabWeighing
             appliedReferences = savedMinimum.Select((low, i) => (low + savedMaximum[i]) / 2).ToArray();
         }
 
-        void SaveSpecifications()
+        bool SaveSpecifications()
         {
-            var lines = new string[4];
-            for (int i = 0; i < 4; i++)
+            var lines = new string[Basket.Colors.Length];
+            for (int i = 0; i < Basket.Colors.Length; i++)
             {
                 string name = productNames[i].Text.Trim();
                 decimal low, high;
@@ -1031,207 +735,26 @@ namespace CrabWeighing
                     !TryReadWeight(minimumWeights[i], out low) || !TryReadWeight(maximumWeights[i], out high) || low > high)
                 {
                     referenceStatus.Text = "检查名称、范围";
-                    return;
+                    return false;
                 }
-                lines[i] = string.Join("\t", name, low.ToString(CultureInfo.InvariantCulture), high.ToString(CultureInfo.InvariantCulture));
+                lines[i] = string.Join("\t", name, low.ToString(CultureInfo.InvariantCulture), high.ToString(CultureInfo.InvariantCulture),
+                    ruleEnabled[i].Checked ? "1" : "0");
             }
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(SpecificationsFile));
                 File.WriteAllLines(SpecificationsFile, lines);
             }
-            catch (IOException) { referenceStatus.Text = "保存失败"; return; }
-            catch (UnauthorizedAccessException) { referenceStatus.Text = "保存失败"; return; }
+            catch (IOException) { referenceStatus.Text = "保存失败"; return false; }
+            catch (UnauthorizedAccessException) { referenceStatus.Text = "保存失败"; return false; }
             ApplySpecInputs();
 
             referenceStatus.Text = "已保存";
             UpdateOrderDisplay();
+            return true;
         }
 
         string OrdersFolder { get { return Path.Combine(DataFolder, demoScale.Checked ? "packing-demo" : "packing-live"); } }
-
-        async System.Threading.Tasks.Task ImportBoxPhoto()
-        {
-            if (importingLabel || choosingOrder) return;
-            string filename;
-            using (var picker = new OpenFileDialog { Title = "上传泡沫箱标签照片",
-                Filter = "标签照片|*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff", CheckFileExists = true,
-                RestoreDirectory = true })
-            {
-                if (picker.ShowDialog(this) != DialogResult.OK) return;
-                filename = picker.FileName;
-            }
-            importingLabel = choosingOrder = true;
-            captureStatus.Text = "正在读取标签照片";
-            try
-            {
-                LabelPhotoResult reading = await LabelPhoto.ReadAsync(filename);
-                if (closing || IsDisposed) return;
-                EditOrder(reading.Specs, filename, reading);
-            }
-            catch (Exception ex)
-            {
-                if (!closing) MessageBox.Show(this, ex.Message, "标签识别失败");
-            }
-            finally
-            {
-                importingLabel = choosingOrder = false;
-            }
-        }
-
-        void OpenOrder()
-        {
-            EditOrder(new LabelSpec[0]);
-        }
-
-        void EditOrder(LabelSpec[] labels, string photo = null, LabelPhotoResult reading = null)
-        {
-            bool importing = photo != null;
-            int dialogWidth = importing ? 482 : 366;
-            using (var form = new Form { Text = importing ? "核对标签识别结果" : "手动扫码 / 装箱工单",
-                StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog,
-                ClientSize = new Size(dialogWidth, 302),
-                MaximizeBox = false, MinimizeBox = false, Font = new Font(Font.FontFamily, 17, FontStyle.Regular, GraphicsUnit.Pixel),
-                BackColor = PanelColor, ForeColor = Ink })
-            {
-                var code = new TextBox { Width = 231, MaxLength = 60, BackColor = Surface, ForeColor = Ink,
-                    Text = !importing ? "" : "BX-" + DateTime.Now.ToString("yyyyMMdd-HHmmssfff") };
-                var inputs = Enumerable.Range(0, 4).Select(i => Amount(0, 0, 0, 10000, 1)).ToArray();
-                var grid = Card(7);
-                Rows(grid, 40, 28, 34, 34, 34, 34, 44);
-                grid.Controls.Add(Line(Note("箱码"), code), 0, 0);
-                var lows = new TextBox[4];
-                var highs = new TextBox[4];
-                string introduction = !importing ? "可用键盘式扫码枪。输入箱码后读取目标。" :
-                    labels.Length == 0 ? "未提取出完整条目，可查看识别文字并手动补填。" :
-                    "提取到 " + labels.Length + " 种绳色，启用前请对照照片核对。";
-                grid.Controls.Add(Note(introduction), 0, 1);
-                for (int i = 0; i < 4; i++)
-                {
-                    var spec = labels.FirstOrDefault(entry => entry.Color == i);
-                    if (spec != null) inputs[i].Value = spec.Quantity;
-                    if (!importing)
-                    {
-                        grid.Controls.Add(Line(ColorLabel(i), inputs[i], Note("只")), 0, i + 2);
-                        continue;
-                    }
-                    lows[i] = WeightInput(0);
-                    highs[i] = WeightInput(0);
-                    lows[i].Text = spec == null ? "" : spec.Minimum.ToString(CultureInfo.CurrentCulture);
-                    highs[i].Text = spec == null ? "" : spec.Maximum.ToString(CultureInfo.CurrentCulture);
-                    grid.Controls.Add(Line(ColorLabel(i), lows[i], Note("–"), highs[i],
-                        Note("g/只"), inputs[i], Note("目标只数")), 0, i + 2);
-                }
-                var open = ActionButton("启用工单");
-                var read = ActionButton("读取目标");
-                var raw = ActionButton("查看识别文字");
-                raw.Click += (s, e) => ShowOcrTranscript(form, reading);
-                grid.Controls.Add(importing ? Line(raw, open) : Line(read, open), 0, 6);
-                form.Controls.Add(grid);
-                float factor = ClientSize.Width / (float)ConsoleLayout.DesignSize.Width;
-                if (Math.Abs(factor - 1) > 0.001F)
-                {
-                    ScaleContents(form, factor);
-                    form.ClientSize = new Size((int)Math.Round(dialogWidth * factor), (int)Math.Round(302 * factor));
-                }
-                Action load = () =>
-                {
-                    if (string.IsNullOrWhiteSpace(code.Text)) return;
-                    try
-                    {
-                        var entry = new PackingOrder(OrdersFolder, code.Text.Trim(), new int[4]);
-                        string path = Path.Combine(entry.Folder, "task.txt");
-                        string[] values = File.Exists(path) ? File.ReadAllLines(path) : new string[0];
-                        for (int i = 0; i < inputs.Length; i++)
-                        {
-                            int value;
-                            inputs[i].Value = i < values.Length && int.TryParse(values[i], out value) && value >= 0 && value <= 10000
-                                ? value : 0;
-                        }
-                    }
-                    catch (Exception ex) { MessageBox.Show(form, ex.Message, "读取工单失败"); }
-                };
-                read.Click += (s, e) => load();
-                code.KeyDown += (s, e) =>
-                {
-                    if (e.KeyCode != Keys.Enter) return;
-                    e.SuppressKeyPress = true;
-                    if (!importing) load();
-                    inputs[0].Focus();
-                };
-                open.Click += (s, e) =>
-                {
-                    try
-                    {
-                        string[] specLines = null;
-                        if (importing)
-                        {
-                            if (inputs.All(input => input.Value == 0))
-                            {
-                                MessageBox.Show(form, "请至少填写一种绳色的目标只数。");
-                                return;
-                            }
-                            specLines = new string[4];
-                            for (int i = 0; i < specLines.Length; i++)
-                            {
-                                decimal low, high;
-                                if (inputs[i].Value == 0 && lows[i].Text.Length == 0 && highs[i].Text.Length == 0)
-                                {
-                                    specLines[i] = savedNames[i] + "\t" + savedMinimum[i].ToString(CultureInfo.InvariantCulture) +
-                                        "\t" + savedMaximum[i].ToString(CultureInfo.InvariantCulture);
-                                    continue;
-                                }
-                                if (!TryReadWeight(lows[i], out low) || !TryReadWeight(highs[i], out high) || low <= 0 || low > high)
-                                {
-                                    MessageBox.Show(form, "请核对" + Basket.Colors[i] + "的单只重量范围。");
-                                    return;
-                                }
-                                string grade = low.ToString("0.###", CultureInfo.InvariantCulture) + "–" +
-                                    high.ToString("0.###", CultureInfo.InvariantCulture) + "g";
-                                specLines[i] = grade + "\t" + low.ToString(CultureInfo.InvariantCulture) +
-                                    "\t" + high.ToString(CultureInfo.InvariantCulture);
-                            }
-                        }
-                        var selected = new PackingOrder(OrdersFolder, code.Text.Trim(), inputs.Select(input => (int)input.Value).ToArray());
-                        selected.SaveGoals();
-                        if (specLines != null)
-                        {
-                            File.WriteAllLines(Path.Combine(selected.Folder, "packing-specs.tsv"), specLines);
-                            using (Image image = Image.FromFile(photo))
-                            using (var previewImage = new Bitmap(image, 160, Math.Max(1, image.Height * 160 / image.Width)))
-                                previewImage.Save(Path.Combine(selected.Folder, "box-label.jpg"), System.Drawing.Imaging.ImageFormat.Jpeg);
-                        }
-                        order = selected;
-                        displayedLabelPath = null;
-                        ReloadSpecifications();
-                        lastUnclassifiedWeight = double.NaN;
-                        unclassifiedMoves = 0;
-                        baselineFrame = null;
-                        ResetCandidates();
-                        LoadLedger();
-                        UpdateOrderDisplay();
-                        form.DialogResult = DialogResult.OK;
-                    }
-                    catch (Exception ex) { MessageBox.Show(form, ex.Message, "启用工单失败"); }
-                };
-                form.ShowDialog(this);
-            }
-        }
-
-        void ShowOcrTranscript(Form owner, LabelPhotoResult reading)
-        {
-            using (var form = new Form { Text = "标签文字识别结果", StartPosition = FormStartPosition.CenterParent,
-                ClientSize = new Size(610, 370), Font = new Font(Font.FontFamily, 16, FontStyle.Regular, GraphicsUnit.Pixel) })
-            {
-                string info = reading == null ? "" : reading.Note;
-                string transcript = reading == null ? "" : reading.Transcript;
-                form.Controls.Add(new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true,
-                    ScrollBars = ScrollBars.Both, WordWrap = false, BackColor = Surface, ForeColor = Ink,
-                    Text = (info.Length == 0 ? "" : info + Environment.NewLine + Environment.NewLine) +
-                        (transcript.Length == 0 ? "OCR 没有返回可供核对的文字。" : transcript) });
-                form.ShowDialog(owner);
-            }
-        }
 
         void ResetOrder()
         {
@@ -1241,68 +764,18 @@ namespace CrabWeighing
             unclassifiedMoves = 0;
             baselineFrame = null;
             ResetCandidates();
-            LoadLedger();
-            UpdateOrderDisplay();
-        }
-
-        void UpdateOrderDisplay()
-        {
-            var values = new string[5][];
-            int goal = 0, packed = 0, remaining = 0;
-            double grams = 0;
-            for (int i = 0; i < 4; i++)
-            {
-                int target = order == null ? 0 : order.Goals[i];
-                int count = order == null ? 0 : order.Counts[i];
-                double weight = order == null ? 0 : order.Weights[i];
-                int left = Math.Max(0, target - count);
-                goal += target;
-                packed += count;
-                remaining += left;
-                grams += weight;
-                string name = savedNames[i] + " / " + Basket.Colors[i];
-                meters[i].SetProgress(name, count, target);
-                values[i] = new[] { name, target.ToString(), count.ToString(), left.ToString(),
-                    weight.ToString("F1"), Percent(Math.Min(count, target), target) };
-            }
-            int applied = order == null ? 0 : order.GoalsMet;
-            values[4] = new[] { "合计汇总", goal.ToString(), packed.ToString(), remaining.ToString(),
-                grams.ToString("F1"), Percent(applied, goal) };
-            summary.SetRows(values);
-            overallProgress.SetProgress(applied, goal);
-            string labelPath = order == null ? null : Path.Combine(order.Folder, "box-label.jpg");
-            if (labelPath != displayedLabelPath)
-            {
-                displayedLabelPath = labelPath;
-                boxMark.SetPhoto(ReadLabelThumbnail(labelPath));
-            }
-            taskCode.Text = order == null ? "未选择工单" : order.Code;
-            taskState.Text = order == null ? "" : order.IsComplete ? "任务已完成" : "配单进行中";
-            taskState.ForeColor = RopeInk[1];
-            taskState.Visible = order != null;
-        }
-
-        static Image ReadLabelThumbnail(string path)
-        {
-            if (path == null || !File.Exists(path)) return null;
-            try
-            {
-                using (Image image = Image.FromFile(path)) return new Bitmap(image);
-            }
-            catch (IOException) { return null; }
-            catch (ArgumentException) { return null; }
-            catch (UnauthorizedAccessException) { return null; }
-            catch (OutOfMemoryException) { return null; }
+            ShowPackingPage(false);
         }
 
         static string Percent(int numerator, int denominator)
         {
-            return denominator == 0 ? "—" : ((double)numerator / denominator).ToString("P0", CultureInfo.InvariantCulture);
+            return denominator == 0 ? "—" : (100.0 * numerator / denominator).ToString("0.#", CultureInfo.InvariantCulture) + "%";
         }
 
         void RefreshRecording(long now, WeightSample weight, long frameTick)
         {
-            if (choosingOrder) return;
+            if (choosingOrder || importingLabel || !packingActive) return;
+            if (order != null && order.Finished) { captureStatus.Text = "装箱已完成"; return; }
             if (order == null) { captureStatus.Text = "请先扫码选择工单"; return; }
             if (!automatic.Checked) { captureStatus.Text = "自动记录已暂停"; ResetCandidates(); return; }
             if (camera != null && camera.Source == CameraSource.Demo && !simulationOpen)
@@ -1412,8 +885,7 @@ namespace CrabWeighing
             catch (UnauthorizedAccessException) { captureStatus.Text = "记录保存失败"; return; }
             catch (System.Runtime.InteropServices.ExternalException) { captureStatus.Text = "快照保存失败"; return; }
             AcceptBaseline(counts, weight.Value);
-            if (resolve) LoadLedger();
-            else AddMoveRow(move);
+            LoadLedger();
             UpdateOrderDisplay();
             captureStatus.Text = move.OutsideRange ? "已记录 · 单只均重超规格范围" : "已保存取放记录";
         }
@@ -1446,7 +918,8 @@ namespace CrabWeighing
             catch (System.Runtime.InteropServices.ExternalException) { captureStatus.Text = "快照保存失败"; return; }
             lastUnclassifiedWeight = weight.Value;
             unclassifiedMoves++;
-            AddMoveRow(move);
+            LoadLedger();
+            RefreshGradeCards();
             captureStatus.Text = "已记净重 · 绳色待确认";
         }
 
@@ -1488,23 +961,6 @@ namespace CrabWeighing
             }
         }
 
-        void LoadLedger()
-        {
-            foreach (DataGridViewRow row in ledger.Rows) DisposeRowImages(row);
-            ledger.Rows.Clear();
-            if (order == null) return;
-            foreach (PackingMove move in order.Moves.Skip(Math.Max(0, order.Moves.Count - 200))) AddMoveRow(move);
-        }
-
-        static void DisposeRowImages(DataGridViewRow row)
-        {
-            for (int i = 1; i <= 3; i++)
-            {
-                var image = row.Cells[i].Value as Image;
-                if (image != null) image.Dispose();
-            }
-        }
-
         Image LoadSnapshot(string name, bool thumbnail)
         {
             if (order == null || string.IsNullOrEmpty(name) || Path.GetFileName(name) != name) return null;
@@ -1519,42 +975,6 @@ namespace CrabWeighing
             catch (ArgumentException) { return null; }
             catch (UnauthorizedAccessException) { return null; }
             catch (OutOfMemoryException) { return null; }
-        }
-
-        void AddMoveRow(PackingMove move)
-        {
-            var row = new DataGridViewRow();
-            row.CreateCells(ledger, move.Delta > 0 ? "放入" : "取出", LoadSnapshot(move.Before, true),
-                LoadSnapshot(move.After, true), LoadSnapshot(move.Target, true),
-                move.Delta.ToString("+0.0;-0.0"), move.Weight.ToString("F1"), move.Color < 0 ? "待确认" : Basket.Colors[move.Color],
-                move.Color < 0 ? "—" : move.Spec + " × " + move.Count + (move.OutsideRange ? " !" : ""));
-            row.Height = ledger.RowTemplate.Height;
-            row.Tag = move;
-            row.Cells[0].Style.ForeColor = move.Delta > 0 ? RopeInk[1] : RopeInk[0];
-            row.Cells[4].Style.ForeColor = row.Cells[0].Style.ForeColor;
-            row.Cells[6].Style.ForeColor = move.Color < 0 ? Muted : RopeInk[move.Color];
-            row.Cells[7].ToolTipText = move.Time.ToString("yyyy-MM-dd HH:mm:ss") + (move.OutsideRange ? " · 超规格范围" : "");
-            ledger.Rows.Insert(0, row);
-            if (ledger.Rows.Count <= 200) return;
-            var last = ledger.Rows[ledger.Rows.Count - 1];
-            DisposeRowImages(last);
-            ledger.Rows.Remove(last);
-        }
-
-        void ShowSnapshot(int row, int column)
-        {
-            if (row < 0 || column < 1 || column > 3) return;
-            var move = (PackingMove)ledger.Rows[row].Tag;
-            using (Image image = LoadSnapshot(column == 1 ? move.Before : column == 2 ? move.After : move.Target, false))
-            {
-                if (image == null) return;
-                using (var form = new Form { Text = ledger.Columns[column].HeaderText, StartPosition = FormStartPosition.CenterParent,
-                    ClientSize = new Size(ConsolePaint.Pixels(this, 640), ConsolePaint.Pixels(this, 360)), BackColor = Surface })
-                {
-                    form.Controls.Add(new PictureBox { Dock = DockStyle.Fill, Image = image, SizeMode = PictureBoxSizeMode.Zoom });
-                    form.ShowDialog(this);
-                }
-            }
         }
 
         static string FormatPosition(TimeSpan? position)
@@ -1611,19 +1031,20 @@ namespace CrabWeighing
             {
                 bool online = camera.Source == CameraSource.Network || camera.Source == CameraSource.Usb;
                 var badge = new Rectangle(px(9), px(9), px(48), px(20));
+                Color overlay = Color.FromArgb(15, 23, 42);
                 ConsolePaint.Tile(e.Graphics, badge, 4, online ? Color.FromArgb(139, 28, 52) :
                     Color.FromArgb(13, 84, 108), Color.FromArgb(44, 118, 142));
                 TextRenderer.DrawText(e.Graphics, online ? "LIVE" : "播放", Font, badge, Color.White,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                TextRenderer.DrawText(e.Graphics, info, Font, new Point(px(65), px(10)), Cyan, Surface);
+                TextRenderer.DrawText(e.Graphics, info, Font, new Point(px(65), px(10)), Color.White, overlay);
                 if (analyzed != null)
                 {
                     var telemetry = new Rectangle(Math.Max(0, preview.Width - px(162)), px(9), px(151), px(21));
                     TextRenderer.DrawText(e.Graphics, "识别耗时 " + inferenceMs.ToString("F1") + " ms",
-                        Font, telemetry, RopeInk[1], Surface, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+                        Font, telemetry, Color.White, overlay, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
                     ConsolePaint.Dot(e.Graphics, px(12), preview.Height - px(22), px(7), RopeInk[1]);
                     TextRenderer.DrawText(e.Graphics, foundBox.IsEmpty ? "寻找白色泡沫箱" : "箱内绳色识别中",
-                        Font, new Point(px(25), preview.Height - px(29)), RopeInk[1], Surface);
+                        Font, new Point(px(25), preview.Height - px(29)), Color.White, overlay);
                 }
             }
             else TextRenderer.DrawText(e.Graphics, info, Font, new Point(px(10), px(9)), Cyan, Surface);
@@ -1692,52 +1113,7 @@ namespace CrabWeighing
             catch (Exception) { }
             timer.Dispose();
             hints.Dispose();
-            foreach (DataGridViewRow row in ledger.Rows) DisposeRowImages(row);
-        }
-
-        static TableLayoutPanel Card(int rows)
-        {
-            var panel = new ConsoleCard { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = rows,
-                Padding = new Padding(8, 5, 8, 5), Margin = new Padding(5), BackColor = PanelColor, CellBorderStyle = TableLayoutPanelCellBorderStyle.None };
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            return panel;
-        }
-
-        static Panel SectionHeading(string text, Color accent, params Control[] actions)
-        {
-            var panel = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
-            if (text.Length > 0)
-            {
-                var label = Heading(text);
-                label.Location = new Point(16, 4);
-                panel.Controls.Add(label);
-                panel.Paint += (sender, e) => ConsolePaint.Dot(e.Graphics, ConsolePaint.Pixels(panel, 3), ConsolePaint.Pixels(panel, 11), ConsolePaint.Pixels(panel, 7), accent);
-            }
-            panel.Paint += (sender, e) =>
-            {
-                using (var pen = new Pen(Border))
-                    e.Graphics.DrawLine(pen, 0, panel.Height - 2, panel.Width, panel.Height - 2);
-            };
-            if (actions.Length > 0)
-            {
-                var right = Line(actions);
-                right.Dock = DockStyle.Right;
-                right.Padding = new Padding(0, 0, 1, 0);
-                panel.Controls.Add(right);
-            }
-            return panel;
-        }
-
-        static TableLayoutPanel Columns(int columns)
-        {
-            var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = columns, RowCount = 1, Margin = Padding.Empty };
-            for (int i = 0; i < columns; i++) panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F / columns));
-            return panel;
-        }
-
-        static void Rows(TableLayoutPanel panel, params int[] heights)
-        {
-            foreach (int height in heights) panel.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            ReleaseOcrPhoto();
         }
 
         static FlowLayoutPanel Line(params Control[] controls)
@@ -1750,7 +1126,7 @@ namespace CrabWeighing
 
         static Label Note(string text)
         {
-            return new Label { Text = text, ForeColor = Muted, AutoSize = true, Margin = new Padding(3, 5, 4, 3) };
+            return new ConsoleLabel { Text = text, ForeColor = Muted, AutoSize = true, Margin = new Padding(3, 5, 4, 3) };
         }
 
         static Label Heading(string text)
@@ -1764,7 +1140,7 @@ namespace CrabWeighing
         static Button ActionButton(string text)
         {
             var button = new ConsoleButton { Text = text, AutoSize = true, Height = 26,
-                Padding = new Padding(5, 0, 5, 0), BackColor = Border, ForeColor = Cyan,
+                Padding = new Padding(5, 0, 5, 0), BackColor = Color.FromArgb(237, 244, 255), ForeColor = Blue,
                 FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false, Cursor = Cursors.Hand, Margin = new Padding(2) };
             button.FlatAppearance.BorderSize = 0;
             return button;

@@ -35,8 +35,9 @@ namespace CrabWeighing
     sealed class PackingOrder
     {
         public readonly string Code, Folder;
-        public readonly int[] Goals, Counts = new int[4];
-        public readonly double[] Weights = new double[4];
+        public bool Finished { get; private set; }
+        public readonly int[] Goals, Counts = new int[Basket.Colors.Length];
+        public readonly double[] Weights = new double[Basket.Colors.Length];
         public readonly List<PackingMove> Moves = new List<PackingMove>();
 
         public PackingOrder(string root, string code, int[] goals)
@@ -49,6 +50,7 @@ namespace CrabWeighing
             using (var sha = System.Security.Cryptography.SHA256.Create())
                 hash = sha.ComputeHash(Encoding.UTF8.GetBytes(code));
             Folder = Path.Combine(root, BitConverter.ToString(hash).Replace("-", ""));
+            Finished = File.Exists(Path.Combine(Folder, "completed.txt"));
             string ledger = Path.Combine(Folder, "moves.tsv");
             if (!File.Exists(ledger)) return;
             foreach (string line in File.ReadLines(ledger))
@@ -58,7 +60,7 @@ namespace CrabWeighing
                 int color, count;
                 double delta, weight;
                 if (fields.Length != 10 || !DateTimeOffset.TryParseExact(fields[0], "o", CultureInfo.InvariantCulture,
-                    DateTimeStyles.None, out at) || !int.TryParse(fields[1], out color) || color < -1 || color >= 4 ||
+                    DateTimeStyles.None, out at) || !int.TryParse(fields[1], out color) || color < -1 || color >= Basket.Colors.Length ||
                     !int.TryParse(fields[2], out count) || !double.TryParse(fields[3], NumberStyles.Float,
                     CultureInfo.InvariantCulture, out delta) || !double.TryParse(fields[4], NumberStyles.Float,
                     CultureInfo.InvariantCulture, out weight)) continue;
@@ -70,14 +72,33 @@ namespace CrabWeighing
         public bool IsComplete { get { return Goals.Sum() > 0 && Goals.Select((goal, i) => Counts[i] >= goal).All(done => done); } }
         public int GoalsMet { get { return Goals.Select((goal, i) => Math.Min(goal, Math.Max(0, Counts[i]))).Sum(); } }
 
+        public bool CanFinish
+        {
+            get { return !Finished && Goals.Sum() > 0 && Goals.SequenceEqual(Counts) && Moves.All(move => move.Color >= 0); }
+        }
+
+        public void Finish()
+        {
+            if (!CanFinish) throw new InvalidOperationException("请核对每种规格的数量，并处理待确认记录。");
+            using (var file = new FileStream(Path.Combine(Folder, "completed.txt"), FileMode.CreateNew, FileAccess.Write))
+            {
+                byte[] stamp = Encoding.UTF8.GetBytes(DateTimeOffset.Now.ToString("o", CultureInfo.InvariantCulture));
+                file.Write(stamp, 0, stamp.Length);
+                file.Flush(true);
+            }
+            Finished = true;
+        }
+
         public void SaveGoals()
         {
+            if (Finished) return;
             Directory.CreateDirectory(Folder);
             File.WriteAllLines(Path.Combine(Folder, "task.txt"), Goals.Select(goal => goal.ToString(CultureInfo.InvariantCulture)));
         }
 
         public void Append(PackingMove move)
         {
+            if (Finished) throw new InvalidOperationException("装箱工单已完成。");
             Directory.CreateDirectory(Folder);
             byte[] bytes = Encoding.UTF8.GetBytes(Serialize(move) + Environment.NewLine);
             using (var ledger = new FileStream(Path.Combine(Folder, "moves.tsv"), FileMode.OpenOrCreate,
@@ -101,19 +122,41 @@ namespace CrabWeighing
 
         public void ResolveLast(PackingMove confirmed)
         {
-            int index = Moves.Count - 1;
-            if (index < 0 || Moves[index].Color != -1) throw new InvalidOperationException("没有可补全的称重记录。");
-            confirmed.Time = Moves[index].Time;
+            if (Moves.Count == 0) throw new InvalidOperationException("没有可补全的称重记录。");
+            Resolve(Moves[Moves.Count - 1], confirmed);
+        }
+
+        public void Resolve(PackingMove pending, PackingMove confirmed)
+        {
+            int index = Moves.IndexOf(pending);
+            if (Finished || index < 0 || pending.Color != -1 || confirmed.Color < 0 || confirmed.Color >= Counts.Length ||
+                confirmed.Count == 0 || Math.Sign(confirmed.Count) != Math.Sign(pending.Delta))
+                throw new InvalidOperationException("这条记录无法按所选规格补全。");
+
+            confirmed.Time = pending.Time;
+            var newMoves = Moves.ToArray();
+            newMoves[index] = confirmed;
+            int[] checkedCounts = new int[Counts.Length];
+            foreach (PackingMove move in newMoves)
+            {
+                if (move.Color < 0) continue;
+                checkedCounts[move.Color] += move.Count;
+                if (checkedCounts[move.Color] < 0)
+                    throw new InvalidOperationException("核对后会导致该规格出现负数。请先核对较早的放入记录。");
+            }
+
             string ledger = Path.Combine(Folder, "moves.tsv");
             string temporary = ledger + "." + Guid.NewGuid().ToString("N");
             try
             {
-                File.WriteAllLines(temporary, Moves.Take(index).Concat(new[] { confirmed }).Select(Serialize), Encoding.UTF8);
+                File.WriteAllLines(temporary, newMoves.Select(Serialize), Encoding.UTF8);
                 File.Replace(temporary, ledger, null);
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
-            Moves.RemoveAt(index);
-            Track(confirmed);
+            Moves.Clear();
+            Array.Clear(Counts, 0, Counts.Length);
+            Array.Clear(Weights, 0, Weights.Length);
+            foreach (PackingMove move in newMoves) Track(move);
         }
 
         static string Serialize(PackingMove move)

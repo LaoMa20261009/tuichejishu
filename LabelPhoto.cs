@@ -16,6 +16,7 @@ namespace CrabWeighing
     {
         public int Color, Quantity;
         public decimal Minimum, Maximum;
+        public RectangleF TextArea;
     }
 
     sealed class LabelPhotoResult
@@ -24,6 +25,7 @@ namespace CrabWeighing
         public string Engine = "";
         public string Transcript = "";
         public string Note = "";
+        public string[] Barcodes = new string[0];
     }
 
     sealed class LabelPhoto
@@ -45,7 +47,7 @@ namespace CrabWeighing
         static readonly Regex Specification = new Regex(
             @"(?<![0-9.])(?:(?<low>[0-9]{1,4}(?:\.[0-9]+)?)[-~—–−至](?<high>[0-9]{1,4}(?:\.[0-9]+)?)|" +
             @"(?<low>[0-9]{2,3})\.(?<high>[0-9]{2,3})(?=[g克/])|" +
-            @"(?<low>[0-9]{3})(?<high>[0-9]{3})(?=[g克/]))(?:g|克|¢)?(?:v(?=/))?(?:[/\\]?(?:只|隻|支|R))?[([【]?(?<color>红|紅|綠|绿|蓝|藍|白)(?:色|绳|繩)?",
+            @"(?<low>[0-9]{3})(?<high>[0-9]{3})(?=[g克/]))(?:g|克|¢)?(?:v(?=/))?(?:[/\\]?(?:只|隻|支|R))?[([【]?(?<color>红|紅|綠|绿|蓝|藍|白|黄|黃)(?:色|绳|繩)?",
             RegexOptions.IgnoreCase);
         static readonly Regex Quantity = new Regex(@"(?:数量|數量|数目|qty)[:;]?(?<count>[0-9Oo]{1,4})(?:只|隻|支)?", RegexOptions.IgnoreCase);
         static readonly Regex NumberWithUnit = new Regex(@"(?<![0-9Gg克/])[:;]?(?<count>[0-9]{1,4})(?:只|隻|支)(?![([【])");
@@ -66,7 +68,7 @@ namespace CrabWeighing
                     try
                     {
                         string[] readings = await RecognizeWindows(executable, photos);
-                        result = JoinRegions(readings, "Windows 中文 OCR");
+                        result = JoinRegions(readings, "Windows 中文 OCR", photos[0]);
                     }
                     catch (InvalidOperationException ex) { result.Note = ex.Message; }
                     catch (TimeoutException ex) { result.Note = ex.Message; }
@@ -74,11 +76,12 @@ namespace CrabWeighing
                 }
                 else result.Note = "当前环境没有 Windows 中文 OCR。";
 
+                result.Barcodes = await Task.Run(() => ReadBarcodes(photos));
                 if (result.Specs.Length >= 3) return result;
                 try
                 {
                     string[] readings = await RecognizeTesseract(photos);
-                    LabelPhotoResult extra = JoinRegions(readings, "Tesseract 中文 OCR");
+                    LabelPhotoResult extra = JoinRegions(readings, "Tesseract 中文 OCR", photos[0]);
                     if (extra.Transcript.Length > 0)
                     {
                         result.Specs = Combine(new[] { result.Specs, extra.Specs });
@@ -99,6 +102,15 @@ namespace CrabWeighing
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
             }
+        }
+
+        static string[] ReadBarcodes(string[] files)
+        {
+            var codes = new HashSet<string>();
+            foreach (string file in files)
+                using (var bitmap = new Bitmap(file))
+                    codes.UnionWith(BoxBarcode.Read(bitmap));
+            return codes.ToArray();
         }
 
         static string[] PrepareImages(string source, string directory)
@@ -232,10 +244,12 @@ namespace CrabWeighing
             }
         }
 
-        static LabelPhotoResult JoinRegions(string[] readings, string engine)
+        static LabelPhotoResult JoinRegions(string[] readings, string engine, string wholeImage)
         {
             var transcript = new List<string>();
             var passes = new List<LabelSpec[]>();
+            Size dimensions;
+            using (Image image = Image.FromFile(wholeImage)) dimensions = image.Size;
             for (int i = 0; i < readings.Length; i++)
             {
                 Reading[] words = ReadWords(readings[i]);
@@ -244,7 +258,14 @@ namespace CrabWeighing
                     string.Join(" ", line.OrderBy(word => word.X).Select(word => word.Text)));
                 transcript.Add("[" + engine + " · " + RegionNames[i] + "]" + Environment.NewLine +
                     string.Join(Environment.NewLine, lines));
-                passes.Add(ParseWords(words));
+                var specs = ParseWords(words);
+                foreach (var spec in specs)
+                {
+                    var box = spec.TextArea;
+                    spec.TextArea = i != 0 ? RectangleF.Empty : new RectangleF(box.X / dimensions.Width,
+                        box.Y / dimensions.Height, box.Width / dimensions.Width, box.Height / dimensions.Height);
+                }
+                passes.Add(specs);
             }
             return new LabelPhotoResult { Specs = Combine(passes), Engine = engine,
                 Transcript = string.Join(Environment.NewLine + Environment.NewLine, transcript) };
@@ -308,7 +329,7 @@ namespace CrabWeighing
                     next[0].Y - line[0].Y < medianHeight * 2.1 &&
                     (next[0].X >= line[0].X - columnTolerance / 2 &&
                      next[0].X < line.Max(word => word.X + word.Width) + medianHeight) &&
-                    next.Any(word => word.Text.IndexOfAny(new[] { '红', '紅', '绿', '綠', '蓝', '藍', '白' }) >= 0) &&
+                    next.Any(word => word.Text.IndexOfAny(new[] { '红', '紅', '绿', '綠', '蓝', '藍', '白', '黄', '黃' }) >= 0) &&
                     !next.Any(word => word.Text.Any(char.IsDigit)))
                     .Take(1).Select(next => line.Concat(next).ToArray()));
             var specs = DistinctHits(groups.Concat(continuations).SelectMany(line => Find(line, Specification)), medianHeight);
@@ -334,7 +355,7 @@ namespace CrabWeighing
                 int count = int.Parse(quantity.Match.Groups["count"].Value.Replace('O', '0').Replace('o', '0'), CultureInfo.InvariantCulture);
                 if (low <= 0 || high < low || count <= 0) continue;
                 string color = spec.Match.Groups["color"].Value;
-                int index = color == "红" || color == "紅" ? 0 : color == "绿" || color == "綠" ? 1 : color == "蓝" || color == "藍" ? 2 : 3;
+                int index = color == "红" || color == "紅" ? 0 : color == "绿" || color == "綠" ? 1 : color == "蓝" || color == "藍" ? 2 : color == "白" ? 3 : 4;
                 var existing = result.FirstOrDefault(item => item.Color == index);
                 if (existing != null)
                 {
@@ -343,7 +364,11 @@ namespace CrabWeighing
                     if (existing.Quantity > 10000) throw new InvalidOperationException("同一绳色的目标数量超过上限。");
                     continue;
                 }
-                result.Add(new LabelSpec { Color = index, Quantity = count, Minimum = low, Maximum = high });
+                float left = (float)Math.Min(spec.X, quantity.X) - medianHeight * 2;
+                float right = (float)Math.Max(spec.Right, quantity.Right) + medianHeight;
+                result.Add(new LabelSpec { Color = index, Quantity = count, Minimum = low, Maximum = high,
+                    TextArea = RectangleF.FromLTRB(Math.Max(0, left), Math.Min(spec.Y, quantity.Y) - 3,
+                        right, Math.Max(spec.Y, quantity.Y) + medianHeight + 3) });
             }
             return result.OrderBy(item => item.Color).ToArray();
         }

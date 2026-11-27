@@ -163,8 +163,9 @@ namespace CrabWeighing
                                 using (var green = new Pen(Color.LimeGreen, 5))
                                 using (var blue = new Pen(Color.RoyalBlue, 5))
                                 using (var white = new Pen(Color.Ivory, 5))
+                                using (var yellow = new Pen(Color.Gold, 5))
                                 {
-                                    var ropes = new[] { red, green, blue, white };
+                                    var ropes = new[] { red, green, blue, white, yellow };
                                     for (int i = 0; i < Math.Min(colors.Length, 12); i++)
                                     {
                                         int x = 135 + i % 4 * 95, y = 70 + i / 4 * 76;

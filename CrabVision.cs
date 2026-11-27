@@ -115,6 +115,7 @@ namespace CrabWeighing
             else hue = 240.0 + 60.0 * (red - green) / delta;
             if (hue < 0) hue += 360;
             if (hue < 19 || hue >= 342) return 1;
+            if (hue >= 34 && hue < 72) return 5;
             if (hue >= 75 && hue < 159) return 2;
             if (hue >= 180 && hue < 253) return 3;
             return 0;

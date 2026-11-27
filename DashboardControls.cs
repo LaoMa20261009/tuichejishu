@@ -1,7 +1,6 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Globalization;
 using System.Windows.Forms;
 
 namespace CrabWeighing
@@ -49,101 +48,17 @@ namespace CrabWeighing
         }
     }
 
-    sealed class ConsoleCard : TableLayoutPanel
+    sealed class ConsoleLabel : Label
     {
-        public Color Outline { get; set; }
-
-        public ConsoleCard()
-        {
-            DoubleBuffered = true;
-            Outline = Color.FromArgb(47, 61, 80);
-        }
-
-        protected override void OnPaintBackground(PaintEventArgs e)
-        {
-            e.Graphics.Clear(Parent == null ? BackColor : Parent.BackColor);
-            ConsolePaint.Tile(e.Graphics, ClientRectangle, 5, BackColor, Outline);
-        }
-    }
-
-    sealed class BoxMark : Control
-    {
-        Image photo;
-
-        public void SetPhoto(Image image)
-        {
-            if (photo != null) photo.Dispose();
-            photo = image;
-            Invalidate();
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing && photo != null) photo.Dispose();
-            base.Dispose(disposing);
-        }
-
         protected override void OnPaint(PaintEventArgs e)
         {
-            ConsolePaint.Tile(e.Graphics, ClientRectangle, 4, Color.FromArgb(224, 238, 247), Color.FromArgb(184, 202, 219));
-            if (photo != null)
-            {
-                double ratio = Math.Min((Width - 8) / (double)photo.Width, (Height - 8) / (double)photo.Height);
-                int width = (int)(photo.Width * ratio), height = (int)(photo.Height * ratio);
-                e.Graphics.DrawImage(photo, (Width - width) / 2, (Height - height) / 2, width, height);
-                base.OnPaint(e);
-                return;
-            }
-            using (var pen = new Pen(Color.FromArgb(17, 48, 67), 2))
-            {
-                int left = 10, top = 10, right = Width - 11, bottom = Height - 11;
-                e.Graphics.DrawLines(pen, new[] { new Point(left, top + 7), new Point(left, top), new Point(left + 7, top) });
-                e.Graphics.DrawLines(pen, new[] { new Point(right - 7, top), new Point(right, top), new Point(right, top + 7) });
-                e.Graphics.DrawLines(pen, new[] { new Point(left, bottom - 7), new Point(left, bottom), new Point(left + 7, bottom) });
-                e.Graphics.DrawLines(pen, new[] { new Point(right - 7, bottom), new Point(right, bottom), new Point(right, bottom - 7) });
-                e.Graphics.DrawRectangle(pen, left + 7, top + 8, right - left - 14, bottom - top - 16);
-                e.Graphics.DrawLine(pen, left + 7, top + 13, right - 7, top + 13);
-            }
-            base.OnPaint(e);
-        }
-    }
-
-    sealed class OverallProgress : Control
-    {
-        static readonly Color Accent = Color.FromArgb(34, 211, 238);
-        readonly Font figure = new Font("Consolas", 32, FontStyle.Bold, GraphicsUnit.Pixel);
-        readonly Font caption = new Font("Microsoft YaHei UI", 13, FontStyle.Bold, GraphicsUnit.Pixel);
-        int complete, goal;
-
-        public void SetProgress(int complete, int goal)
-        {
-            this.complete = complete;
-            this.goal = goal;
-            Invalidate();
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            ConsolePaint.Tile(e.Graphics, ClientRectangle, 5, Color.FromArgb(10, 32, 46), Color.FromArgb(12, 101, 122));
-            Func<int, int> px = value => ConsolePaint.Pixels(this, value);
-            int top = Math.Max(2, (Height - px(85)) / 2);
-            var center = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding;
-            using (Font label = ConsolePaint.PaintFont(this, caption))
-            using (Font number = ConsolePaint.PaintFont(this, figure))
-            {
-                TextRenderer.DrawText(e.Graphics, "总装箱进度", label, new Rectangle(0, top, Width, px(19)), Accent, center);
-                string percent = goal == 0 ? "—" : ((double)complete / goal * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
-                TextRenderer.DrawText(e.Graphics, percent, number, new Rectangle(0, top + px(20), Width, px(40)), Accent, center);
-                var pill = new Rectangle(Math.Max(2, (Width - px(86)) / 2), top + px(63), Math.Min(px(86), Width - 4), px(22));
-                ConsolePaint.Tile(e.Graphics, pill, px(10), Color.FromArgb(14, 26, 43), Color.FromArgb(25, 71, 96));
-                TextRenderer.DrawText(e.Graphics, complete + " / " + goal + " 只", label, pill, ForeColor, center);
-            }
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) { figure.Dispose(); caption.Dispose(); }
-            base.Dispose(disposing);
+            Rectangle box = Rectangle.FromLTRB(Padding.Left, Padding.Top,
+                ClientRectangle.Right - Padding.Right, ClientRectangle.Bottom - Padding.Bottom);
+            var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
+            if (TextAlign == ContentAlignment.MiddleCenter) flags |= TextFormatFlags.HorizontalCenter;
+            else if (TextAlign == ContentAlignment.MiddleRight) flags |= TextFormatFlags.Right;
+            else flags |= TextFormatFlags.Left;
+            TextRenderer.DrawText(e.Graphics, Text, Font, box, ForeColor, flags);
         }
     }
 
@@ -193,62 +108,6 @@ namespace CrabWeighing
         }
     }
 
-    sealed class TaskMeter : Control
-    {
-        readonly Color tint;
-        readonly Font strong = new Font("Microsoft YaHei UI", 14, FontStyle.Bold, GraphicsUnit.Pixel);
-        readonly Font detailFont = new Font("Microsoft YaHei UI", 13, FontStyle.Regular, GraphicsUnit.Pixel);
-        string name = "", detail = "", percentage = "—";
-        double fraction;
-
-        public TaskMeter(Color tint, Color background)
-        {
-            this.tint = tint;
-            BackColor = background;
-            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
-        }
-
-        public void SetProgress(string name, int packed, int goal)
-        {
-            fraction = goal == 0 ? 0 : Math.Min(1, (double)packed / goal);
-            this.name = name;
-            detail = "目标 " + goal + " 只   |   已装 " + packed + " 只";
-            percentage = goal == 0 ? "—" : (fraction * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
-            Invalidate();
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            ConsolePaint.Tile(e.Graphics, ClientRectangle, 4, BackColor, ControlPaint.Dark(tint, 0.48F));
-            Func<int, int> px = value => ConsolePaint.Pixels(this, value);
-            ConsolePaint.Dot(e.Graphics, px(9), px(6), px(7), tint);
-            int nameWidth = Math.Min(px(151), Width / 3);
-            const TextFormatFlags text = TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
-            using (Font label = ConsolePaint.PaintFont(this, strong))
-            using (Font description = ConsolePaint.PaintFont(this, detailFont))
-            {
-                TextRenderer.DrawText(e.Graphics, name, label, new Rectangle(px(22), 1, nameWidth, px(17)), tint, text);
-                TextRenderer.DrawText(e.Graphics, detail, description,
-                    new Rectangle(px(27) + nameWidth, 1, Math.Max(1, Width - nameWidth - px(76)), px(17)),
-                    Color.FromArgb(164, 179, 197), text);
-                TextRenderer.DrawText(e.Graphics, percentage, label,
-                    new Rectangle(Width - px(46), 1, px(38), px(17)), tint,
-                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-            }
-            var track = new Rectangle(px(9), Height - px(6), Math.Max(1, Width - px(18)), px(3));
-            using (var brush = new SolidBrush(Color.FromArgb(7, 14, 26))) e.Graphics.FillRectangle(brush, track);
-            using (var brush = new SolidBrush(tint))
-                e.Graphics.FillRectangle(brush, track.X, track.Y, (int)(track.Width * fraction), track.Height);
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) { strong.Dispose(); detailFont.Dispose(); }
-            base.Dispose(disposing);
-        }
-    }
-
     sealed class ConsoleButton : Button
     {
         bool hover;
@@ -279,96 +138,67 @@ namespace CrabWeighing
         }
     }
 
-    sealed class WeightReadout : Label
+    sealed class GradeCard : Button
     {
-        readonly Font caption = new Font("Microsoft YaHei UI", 12, FontStyle.Bold, GraphicsUnit.Pixel);
+        readonly string spec, colorName, numbers, status;
+        readonly Color ink, fill;
+        readonly bool active;
+        readonly int current, goal;
+
+        public GradeCard(string spec, string color, int current, int goal, bool active, Color ink, Color fill)
+        {
+            this.spec = spec;
+            colorName = color;
+            this.current = current;
+            this.goal = goal;
+            this.active = active;
+            this.ink = ink;
+            this.fill = fill;
+            numbers = current + " / " + goal + " 只";
+            status = goal > 0 && current == goal ? "已全部装满" : current > goal ? "超过目标" :
+                active ? "当前装箱中" : "等待装箱";
+            AccessibleName = color + " " + spec + " " + numbers;
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+            Cursor = Cursors.Hand;
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            ConsolePaint.Tile(e.Graphics, ClientRectangle, 5, Color.FromArgb(8, 24, 37), Color.FromArgb(15, 65, 86));
+            Color text = Color.FromArgb(11, 28, 48), primary = Color.FromArgb(0, 97, 148);
+            Color green = Color.FromArgb(0, 105, 71), faint = Color.FromArgb(226, 236, 251);
+            e.Graphics.Clear(Parent == null ? BackColor : Parent.BackColor);
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, 8, active ? Color.FromArgb(238, 246, 255) :
+                Color.White, active ? primary : faint);
             Func<int, int> px = value => ConsolePaint.Pixels(this, value);
-            ConsolePaint.Dot(e.Graphics, px(9), px(11), px(5), ForeColor);
-            using (Font label = ConsolePaint.PaintFont(this, caption))
-                TextRenderer.DrawText(e.Graphics, "实时净重", label, new Point(px(20), px(6)), ForeColor);
-            var room = new Rectangle(px(8), px(17), Math.Max(1, Width - px(16)), Math.Max(1, Height - px(18)));
-            TextRenderer.DrawText(e.Graphics, Text, Font, room, ForeColor,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) caption.Dispose();
-            base.Dispose(disposing);
-        }
-    }
-
-    sealed class PackingSummary : Control
-    {
-        readonly string[] headings = { "规格 / 绳色", "待装", "已装", "剩余", "总重量 g", "完成率" };
-        readonly int[] widths = { 31, 11, 11, 11, 18, 18 };
-        readonly Color[] colorInks;
-        readonly Font headerFont = new Font("Microsoft YaHei UI", 15, FontStyle.Bold, GraphicsUnit.Pixel);
-        string[][] rows = new string[0][];
-
-        public PackingSummary(Color[] colorInks)
-        {
-            this.colorInks = colorInks;
-            BackColor = Color.FromArgb(11, 17, 28);
-            ForeColor = Color.FromArgb(235, 241, 250);
-            SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        }
-
-        public void SetRows(string[][] values)
-        {
-            rows = values;
-            Invalidate();
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-            if (Height < 6) return;
-            int rowHeight = Height / 6;
-            using (Font heading = ConsolePaint.PaintFont(this, headerFont))
-            for (int row = 0; row <= rows.Length; row++)
+            ConsolePaint.Dot(e.Graphics, px(13), px(14), px(38), fill);
+            ConsolePaint.Dot(e.Graphics, px(23), px(24), px(18), ink);
+            using (var title = new Font(Font.FontFamily, px(16), FontStyle.Bold, GraphicsUnit.Pixel))
+            using (var note = new Font(Font.FontFamily, px(13), FontStyle.Regular, GraphicsUnit.Pixel))
+            using (var figure = new Font("Consolas", px(21), FontStyle.Bold, GraphicsUnit.Pixel))
             {
-                var band = new Rectangle(0, row * rowHeight, Width, rowHeight);
-                Color background = row == 0 ? Color.FromArgb(22, 33, 52) :
-                    row == rows.Length ? Color.FromArgb(17, 24, 41) :
-                    row % 2 == 0 ? Color.FromArgb(14, 22, 36) : BackColor;
-                using (var brush = new SolidBrush(background)) e.Graphics.FillRectangle(brush, band);
-                using (var pen = new Pen(Color.FromArgb(47, 61, 80)))
-                    e.Graphics.DrawLine(pen, 0, band.Bottom - 1, Width, band.Bottom - 1);
-                string[] cells = row == 0 ? headings : rows[row - 1];
-                int offset = 0;
-                for (int col = 0; col < widths.Length; col++)
-                {
-                    int left = Width * offset / 100;
-                    offset += widths[col];
-                    int right = Width * offset / 100;
-                    var cell = Rectangle.FromLTRB(left + 5, band.Top, right - 3, band.Bottom);
-                    Color ink = row == 0 ? ForeColor :
-                        col == 2 || col == 5 ? colorInks[1] :
-                        col == 3 ? Color.FromArgb(252, 196, 71) :
-                        row == rows.Length ? Color.FromArgb(34, 211, 238) : ForeColor;
-                    if (col == 0 && row > 0)
-                    {
-                        ConsolePaint.Dot(e.Graphics, left + 8, band.Top + (band.Height - 7) / 2, 7,
-                            row == rows.Length ? Color.FromArgb(34, 211, 238) : colorInks[row - 1]);
-                        cell.X += 17;
-                        cell.Width -= 17;
-                    }
-                    TextRenderer.DrawText(e.Graphics, cells[col], row == 0 ? heading : Font, cell, ink,
-                        TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
-                        (col == 0 ? TextFormatFlags.Left : TextFormatFlags.HorizontalCenter));
-                }
+                const TextFormatFlags left = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
+                TextRenderer.DrawText(e.Graphics, colorName + " · " + spec, title,
+                    new Rectangle(px(61), px(10), Math.Max(1, Width - px(203)), px(25)), active ? primary : text, left);
+                TextRenderer.DrawText(e.Graphics, status + "    剩余 " + Math.Max(0, goal - current) + " 只", note,
+                    new Rectangle(px(61), px(36), Math.Max(1, Width - px(141)), px(20)), active ? primary : text, left);
+                TextRenderer.DrawText(e.Graphics, numbers, figure,
+                    new Rectangle(Width - px(139), px(10), px(125), px(29)), goal > 0 && current >= goal ? green : primary,
+                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+                if (goal > 0)
+                    TextRenderer.DrawText(e.Graphics, (100.0 * current / goal).ToString("0.#") + "%", note,
+                        new Rectangle(Width - px(100), px(39), px(86), px(19)), green,
+                        TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
             }
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) headerFont.Dispose();
-            base.Dispose(disposing);
+            var track = new Rectangle(px(13), Height - px(20), Math.Max(1, Width - px(26)), px(8));
+            ConsolePaint.Tile(e.Graphics, track, px(4), faint, faint);
+            if (goal > 0 && current > 0)
+            {
+                track.Width = (int)(track.Width * Math.Min(1.0, current / (double)goal));
+                Color progress = current >= goal ? green : primary;
+                ConsolePaint.Tile(e.Graphics, track, px(4), progress, progress);
+            }
+            if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(ClientRectangle, -3, -3));
         }
     }
 }

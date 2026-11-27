@@ -4,7 +4,7 @@ namespace CrabWeighing
 {
     static class Basket
     {
-        public static readonly string[] Colors = { "红色", "绿色", "蓝色", "白色" };
+        public static readonly string[] Colors = { "红色", "绿色", "蓝色", "白色", "黄色" };
         public const int MaximumCount = 60;
 
         public static bool TryGrams(double weight, string unit, out double grams)
