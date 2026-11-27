@@ -103,7 +103,10 @@ namespace CrabWeighing
         double lastUnclassifiedWeight = double.NaN;
         int unclassifiedMoves;
         long nextDemoStep;
-        bool changingDemoCount, demoRemovalDone;
+        bool changingDemoCount, demoRemovalDone, manualSimulation;
+        VideoFrame manualBefore;
+        double manualWeight;
+        string manualFeedback = "";
         long cameraStarted;
         long lastPoll;
         long lastAnalysis;
@@ -189,7 +192,20 @@ namespace CrabWeighing
             };
             cycleLoads.CheckedChanged += (s, e) =>
             {
-                if (cycleLoads.Checked) nextDemoStep = Stopwatch.GetTimestamp() + 4 * Stopwatch.Frequency;
+                if (!cycleLoads.Checked) return;
+                if (manualBefore != null)
+                {
+                    cycleLoads.Checked = false;
+                    return;
+                }
+                manualFeedback = "";
+                if (manualSimulation)
+                {
+                    manualSimulation = false;
+                    if (camera == null || camera.Source != CameraSource.Demo) baselineFrame = null;
+                    ResetCandidates();
+                }
+                nextDemoStep = Stopwatch.GetTimestamp() + 4 * Stopwatch.Frequency;
             };
             LoadSettings();
             LoadReferences();
@@ -463,6 +479,7 @@ namespace CrabWeighing
                     simulationOpen = false;
                     cycleLoads.Checked = false;
                     demoRemovalDone = false;
+                    ClearManualSimulation();
                     simulatedScale.Clear();
                     UpdateDemoCount();
                 }
@@ -520,7 +537,7 @@ namespace CrabWeighing
             ports.Enabled = protocol.Enabled = !connected && !demoScale.Checked;
             simulationControls.Visible = demoScale.Checked;
             serialControls.Visible = serialHint.Visible = !demoScale.Checked;
-            cycleLoads.Enabled = simulationOpen;
+            cycleLoads.Enabled = simulationOpen && manualBefore == null;
             crabCount.Enabled = simulationOpen;
             foreach (var button in simulationControls.Controls.OfType<Button>()) button.Enabled = simulationOpen;
             scaleButton.Text = connected ? "断开秤" : demoScale.Checked ? "启动模拟秤" : "连接电子秤";
@@ -599,16 +616,85 @@ namespace CrabWeighing
             return sample;
         }
 
+        void ClearManualSimulation()
+        {
+            manualSimulation = false;
+            manualBefore = null;
+            manualFeedback = "";
+        }
+
         void AdjustDemoCrabs(int change)
         {
-            if (!simulationOpen || change == 0) return;
+            if (!simulationOpen || change == 0 || manualBefore != null)
+            {
+                UpdateDemoCount();
+                return;
+            }
+            if (packingActive && order != null && order.Finished) return;
+            int[] colors = simulationColors;
+            bool recording = packingActive && order != null;
+            int color = recording && shownGrade >= 0 ? shownGrade :
+                change < 0 && colors.Length > 0 ? colors[colors.Length - 1] : NextDemoColor();
+            if (color < 0) color = colors.Length > 0 ? colors[colors.Length - 1] : 0;
+            change = change < 0 ? -Math.Min(-change, colors.Count(item => item == color)) :
+                Math.Min(change, CameraSession.DemoCapacity - colors.Length);
+
+            if (change == 0)
+            {
+                captureStatus.Text = manualFeedback = "该规格没有可取出的螃蟹，或模拟箱已满";
+                UpdateDemoCount();
+                return;
+            }
+            if (recording)
+            {
+                var confirmed = order.Moves.LastOrDefault(move => move.Color >= 0);
+                double expected = confirmed == null ? 0 : confirmed.Weight;
+                manualWeight = simulatedScale.TargetGrams - tare;
+                if (!DemoCounts(colors).SequenceEqual(order.Counts) ||
+                    Math.Abs(manualWeight - expected) > EmptyLimit || order.Moves.Any(move => move.Color < 0))
+                {
+                    captureStatus.Text = manualFeedback = "请等待上一笔入账，或先核对待确认记录";
+                    UpdateDemoCount();
+                    return;
+                }
+                manualBefore = CameraSession.DrawDemoFrame(colors);
+                manualSimulation = true;
+                packingSimulation.Enabled = finishPacking.Enabled = false;
+            }
             cycleLoads.Checked = false;
-            int color = change < 0 && simulationColors.Length > 0 ?
-                simulationColors[simulationColors.Length - 1] : NextDemoColor();
-            if (color < 0) color = simulationColors.Length > 0 ? simulationColors[simulationColors.Length - 1] : 0;
-            change = Math.Min(change, (int)crabCount.Maximum - simulationColors.Length);
+            manualFeedback = "";
             simulatedScale.Adjust(color, change, appliedReferences);
             UpdateDemoCount();
+        }
+
+        static int[] DemoCounts(int[] colors)
+        {
+            var counts = new int[Basket.Colors.Length];
+            foreach (int color in colors) counts[color]++;
+            return counts;
+        }
+
+        void RecordManualSimulation(WeightSample weight)
+        {
+            if (manualBefore == null) return;
+            if (weight == null || !weight.Valid || !weight.Stable)
+            {
+                captureStatus.Text = "模拟取放中 · 等待净重稳定";
+                return;
+            }
+            long now = Stopwatch.GetTimestamp();
+            if (CaptureGate.Elapsed(now, lastWriteAttempt) < 1) return;
+            var counts = DemoCounts(simulationColors);
+            var move = PackingMove.Detect(order.Counts, counts, manualWeight, weight.Value, 0);
+            if (move == null) return;
+            var after = CameraSession.DrawDemoFrame(simulationColors);
+            var observation = CrabVision.Read(after, FoamBox.Find(after, new Rectangle(0, 0, VideoFrame.Width, VideoFrame.Height)), 0.12);
+            lastWriteAttempt = now;
+            if (!SaveConfirmedMove(move, manualBefore, after, observation, false)) return;
+            manualBefore = null;
+            if (!move.OutsideRange) captureStatus.Text = "已保存模拟取放记录";
+            AcceptBaseline(counts, weight.Value, after);
+            UpdateOrderDisplay();
         }
 
         int NextDemoColor()
@@ -817,6 +903,7 @@ namespace CrabWeighing
         void ResetOrder()
         {
             order = null;
+            ClearManualSimulation();
             ReloadSpecifications();
             lastUnclassifiedWeight = double.NaN;
             unclassifiedMoves = 0;
@@ -832,7 +919,14 @@ namespace CrabWeighing
 
         void RefreshRecording(long now, WeightSample weight, long frameTick)
         {
-            if (choosingOrder || importingLabel || !packingActive) return;
+            if (!packingActive || importingLabel) return;
+            if (manualSimulation && order != null && !order.Finished)
+            {
+                RecordManualSimulation(weight);
+                if (manualBefore == null && manualFeedback.Length != 0) captureStatus.Text = manualFeedback;
+                return;
+            }
+            if (choosingOrder) return;
             if (order != null && order.Finished) { captureStatus.Text = "装箱已完成"; return; }
             if (order == null) { captureStatus.Text = "请先扫码选择工单"; return; }
             if (camera != null && camera.Source == CameraSource.Demo && !simulationOpen)
@@ -895,7 +989,7 @@ namespace CrabWeighing
                     captureStatus.Text = confirmed == null ? "请放空箱并去皮" : "请将原箱放回并核对净重";
                     return;
                 }
-                AcceptBaseline(counts, weight.Value);
+                AcceptBaseline(counts, weight.Value, analyzed);
                 nextDemoStep = now + Stopwatch.Frequency;
                 captureStatus.Text = "已就绪";
                 return;
@@ -908,7 +1002,7 @@ namespace CrabWeighing
                     if (unclassifiedMoves > 0) TryRecordUnclassified(now, weight);
                     if (unclassifiedMoves == 0 || Math.Abs(lastUnclassifiedWeight - weight.Value) <= WeightTolerance)
                     {
-                        AcceptBaseline(counts, weight.Value);
+                        AcceptBaseline(counts, weight.Value, analyzed);
                         captureStatus.Text = "等待放入或取出";
                     }
                 }
@@ -930,27 +1024,32 @@ namespace CrabWeighing
             }
             if (CaptureGate.Elapsed(now, lastWriteAttempt) < 1) return;
             lastWriteAttempt = now;
+            if (!SaveConfirmedMove(move, baselineFrame, analyzed, stableObservation, resolve)) return;
+            AcceptBaseline(counts, weight.Value, analyzed);
+            UpdateOrderDisplay();
+        }
+
+        bool SaveConfirmedMove(PackingMove move, VideoFrame before, VideoFrame after, CrabObservation observation, bool resolve)
+        {
             double perCrab = Math.Abs(move.Delta / move.Count);
             move.Spec = savedNames[move.Color];
             move.OutsideRange = perCrab < savedMinimum[move.Color] || perCrab > savedMaximum[move.Color];
             try
             {
-                SaveSnapshots(move, analyzed, stableObservation);
+                SaveSnapshots(move, before, after, observation);
                 if (resolve) order.ResolveLast(move);
                 else order.Append(move);
             }
-            catch (IOException) { captureStatus.Text = "记录保存失败"; return; }
-            catch (UnauthorizedAccessException) { captureStatus.Text = "记录保存失败"; return; }
-            catch (System.Runtime.InteropServices.ExternalException) { captureStatus.Text = "快照保存失败"; return; }
-            AcceptBaseline(counts, weight.Value);
-            LoadLedger();
-            UpdateOrderDisplay();
+            catch (IOException) { captureStatus.Text = "记录保存失败"; return false; }
+            catch (UnauthorizedAccessException) { captureStatus.Text = "记录保存失败"; return false; }
+            catch (System.Runtime.InteropServices.ExternalException) { captureStatus.Text = "快照保存失败"; return false; }
             captureStatus.Text = move.OutsideRange ? "已记录 · 单只均重超规格范围" : "已保存取放记录";
+            return true;
         }
 
-        void AcceptBaseline(int[] counts, double weight)
+        void AcceptBaseline(int[] counts, double weight, VideoFrame frame)
         {
-            baselineFrame = analyzed;
+            baselineFrame = frame;
             baselineCounts = (int[])counts.Clone();
             baselineWeight = weight;
             lastUnclassifiedWeight = double.NaN;
@@ -968,7 +1067,7 @@ namespace CrabWeighing
                 Weight = weight.Value, Spec = "待确认", Before = "", After = "", Target = "" };
             try
             {
-                if (displayed != null) SaveSnapshots(move, displayed, null);
+                if (displayed != null) SaveSnapshots(move, baselineFrame, displayed, null);
                 order.Append(move);
             }
             catch (IOException) { captureStatus.Text = "记录保存失败"; return; }
@@ -981,7 +1080,7 @@ namespace CrabWeighing
             captureStatus.Text = "已记净重 · 绳色待确认";
         }
 
-        void SaveSnapshots(PackingMove move, VideoFrame frame, CrabObservation after)
+        void SaveSnapshots(PackingMove move, VideoFrame reference, VideoFrame frame, CrabObservation after)
         {
             string id = Guid.NewGuid().ToString("N");
             string directory = Path.Combine(order.Folder, "images");
@@ -989,7 +1088,7 @@ namespace CrabWeighing
             move.Before = id + "-before.jpg";
             move.After = id + "-after.jpg";
             move.Target = id + "-target.jpg";
-            using (Bitmap before = baselineFrame.ToBitmap())
+            using (Bitmap before = reference.ToBitmap())
             using (Bitmap current = frame.ToBitmap())
             {
                 before.Save(Path.Combine(directory, move.Before), System.Drawing.Imaging.ImageFormat.Jpeg);
@@ -1000,7 +1099,8 @@ namespace CrabWeighing
                     return;
                 }
                 bool addition = move.Count > 0;
-                CrabObservation prior = CrabVision.Read(baselineFrame, FoamBox.Find(baselineFrame, area), 0.12);
+                Rectangle roi = manualSimulation ? new Rectangle(0, 0, VideoFrame.Width, VideoFrame.Height) : area;
+                CrabObservation prior = CrabVision.Read(reference, FoamBox.Find(reference, roi), 0.12);
                 var present = (addition ? after : prior).Targets.Where(target => target.ColorIndex == move.Color);
                 var other = (addition ? prior : after).Targets.Where(target => target.ColorIndex == move.Color).ToArray();
                 CrabTarget focus = present.OrderByDescending(target => other.Select(candidate =>

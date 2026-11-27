@@ -45,11 +45,11 @@ namespace CrabWeighing
         }
 
         static readonly Regex Specification = new Regex(
-            @"(?<![0-9.])(?:(?<low>[0-9]{1,4}(?:\.[0-9]+)?)[-~—–−至](?<high>[0-9]{1,4}(?:\.[0-9]+)?)|" +
+            @"(?<![0-9.])(?:(?<low>[0-9]{1,4}(?:\.[0-9]+)?)[-~—–−至一﹣](?<high>[0-9]{1,4}(?:\.[0-9]+)?)|" +
             @"(?<low>[0-9]{2,3})\.(?<high>[0-9]{2,3})(?=[g克/])|" +
-            @"(?<low>[0-9]{3})(?<high>[0-9]{3})(?=[g克/]))(?:g|克|¢)?(?:v(?=/))?(?:[/\\]?(?:只|隻|支|R))?[([【]?(?<color>红|紅|綠|绿|蓝|藍|白|黄|黃)(?:色|绳|繩)?",
+            @"(?<low>[0-9]{3})(?<high>[0-9]{3})(?=[g克/]))(?:g|克|¢)?(?:v(?=/))?(?:[/\\]?(?:只|隻|支|口|尺|R))?[([【]?(?<color>红|紅|綠|绿|蓝|藍|白|黄|黃)(?:色|绳|繩)?",
             RegexOptions.IgnoreCase);
-        static readonly Regex Quantity = new Regex(@"(?:数量|數量|数目|qty)[:;]?(?<count>[0-9Oo]{1,4})(?:只|隻|支)?", RegexOptions.IgnoreCase);
+        static readonly Regex Quantity = new Regex(@"(?:数量|數量|数目|数里|数重|qty)[:;]?(?<count>[0-9OoIl]{1,4})(?:只|隻|支|口)?", RegexOptions.IgnoreCase);
         static readonly Regex NumberWithUnit = new Regex(@"(?<![0-9Gg克/])[:;]?(?<count>[0-9]{1,4})(?:只|隻|支)(?![([【])");
         static readonly string[] RegionNames = { "整图", "左上", "右上", "左下", "右下" };
 
@@ -82,16 +82,13 @@ namespace CrabWeighing
                 {
                     string[] readings = await RecognizeTesseract(photos);
                     LabelPhotoResult extra = JoinRegions(readings, "Tesseract 中文 OCR", photos[0]);
-                    if (extra.Transcript.Length > 0)
-                    {
-                        result.Specs = Combine(new[] { result.Specs, extra.Specs });
-                        result.Transcript = string.Join(Environment.NewLine + Environment.NewLine,
-                            new[] { result.Transcript, extra.Transcript }.Where(text => text.Length > 0));
-                        result.Engine = result.Engine.Length == 0 ? extra.Engine : result.Engine + " / " + extra.Engine;
-                    }
+                    MergeResult(result, extra);
                 }
                 catch (System.ComponentModel.Win32Exception) { }
                 catch (TimeoutException) { }
+                if (result.Specs.Length == 0)
+                    await TryReadSingleLabel(photos[0], temporary, executable, result);
+                if (result.Specs.Length > 0) result.Note = "";
                 if (result.Specs.Length == 0 && result.Note.Length == 0)
                     result.Note = "OCR 已运行，但没有配对出完整的绳色、规格和数量。";
                 return result;
@@ -101,6 +98,64 @@ namespace CrabWeighing
                 try { Directory.Delete(temporary, true); }
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        static void MergeResult(LabelPhotoResult result, LabelPhotoResult extra)
+        {
+            if (extra.Transcript.Length == 0) return;
+            result.Specs = Combine(new[] { result.Specs, extra.Specs });
+            result.Transcript = string.Join(Environment.NewLine + Environment.NewLine,
+                new[] { result.Transcript, extra.Transcript }.Where(text => text.Length > 0));
+            if (result.Engine.Length == 0) result.Engine = extra.Engine;
+            else if (!result.Engine.Contains(extra.Engine)) result.Engine += " / " + extra.Engine;
+        }
+
+        static async Task TryReadSingleLabel(string original, string directory, string windowsOcr, LabelPhotoResult result)
+        {
+            string enhanced = Path.Combine(directory, "label-text.png");
+            await Task.Run(() => EnhanceText(original, enhanced));
+            try
+            {
+                if (result.Engine.Contains("Windows"))
+                {
+                    string[] windows = await RecognizeWindows(windowsOcr, new[] { enhanced });
+                    MergeResult(result, JoinRegions(windows, "Windows 中文 OCR", enhanced));
+                    if (result.Specs.Length > 0) return;
+                }
+            }
+            catch (InvalidOperationException) { }
+            catch (TimeoutException) { }
+            catch (System.ComponentModel.Win32Exception) { }
+
+            try
+            {
+                string[] readings = await RecognizeTesseract(new[] { enhanced }, true);
+                MergeResult(result, JoinRegions(readings, "Tesseract 中文 OCR", enhanced));
+            }
+            catch (TimeoutException) { }
+            catch (System.ComponentModel.Win32Exception) { }
+        }
+
+        static void EnhanceText(string source, string destination)
+        {
+            const float gain = 1.65f;
+            using (var image = new Bitmap(source))
+            using (var output = new Bitmap(image.Width, image.Height, PixelFormat.Format24bppRgb))
+            using (var canvas = Graphics.FromImage(output))
+            using (var attributes = new ImageAttributes())
+            {
+                attributes.SetColorMatrix(new ColorMatrix(new[]
+                {
+                    new[] { .299f * gain, .299f * gain, .299f * gain, 0f, 0f },
+                    new[] { .587f * gain, .587f * gain, .587f * gain, 0f, 0f },
+                    new[] { .114f * gain, .114f * gain, .114f * gain, 0f, 0f },
+                    new[] { 0f, 0f, 0f, 1f, 0f },
+                    new[] { -.32f, -.32f, -.32f, 0f, 1f }
+                }));
+                canvas.DrawImage(image, new Rectangle(0, 0, image.Width, image.Height), 0, 0, image.Width, image.Height,
+                    GraphicsUnit.Pixel, attributes);
+                output.Save(destination, ImageFormat.Png);
             }
         }
 
@@ -177,14 +232,14 @@ namespace CrabWeighing
             return result.Item1.Split(new[] { "REGION_START" }, StringSplitOptions.None).Skip(1).ToArray();
         }
 
-        static async Task<string[]> RecognizeTesseract(string[] photos)
+        static async Task<string[]> RecognizeTesseract(string[] photos, bool singleBlock = false)
         {
             string executable = FindTesseract();
             var result = new List<string>();
             for (int i = 0; i < photos.Length; i++)
             {
                 var output = await RunProcess(executable, CameraSession.Quote(photos[i]) +
-                    " stdout -l chi_sim --psm " + (i == 0 ? "11" : "6") + " -c tessedit_create_tsv=1", 15000);
+                    " stdout -l chi_sim --psm " + (!singleBlock && i == 0 ? "11" : "6") + " -c tessedit_create_tsv=1", 15000);
                 if (output.Item3 != 0) break;
                 result.Add(ConvertTesseract(output.Item1));
             }
@@ -259,6 +314,7 @@ namespace CrabWeighing
                 transcript.Add("[" + engine + " · " + RegionNames[i] + "]" + Environment.NewLine +
                     string.Join(Environment.NewLine, lines));
                 var specs = ParseWords(words);
+                if (i == 0 && specs.Length == 0) specs = ParseText(string.Join(Environment.NewLine, lines));
                 foreach (var spec in specs)
                 {
                     var box = spec.TextArea;
@@ -281,6 +337,41 @@ namespace CrabWeighing
         internal static LabelSpec[] Parse(string data)
         {
             return ParseWords(ReadWords(data));
+        }
+
+        internal static LabelSpec[] ParseText(string transcript)
+        {
+            string text = string.Concat(transcript.Where(character => !char.IsWhiteSpace(character)).Select(ToHalfWidth));
+            MatchCollection specs = Specification.Matches(text);
+            // Without coordinates, only combine fields when the document has one unambiguous label.
+            if (specs.Count != 1) return new LabelSpec[0];
+            Match spec = specs[0];
+            MatchCollection amounts = Quantity.Matches(text);
+            if (amounts.Count == 0)
+                amounts = NumberWithUnit.Matches(text.Substring(spec.Index + spec.Length));
+            if (amounts.Count != 1) return new LabelSpec[0];
+            LabelSpec result = CreateSpecification(spec, amounts[0]);
+            return result == null ? new LabelSpec[0] : new[] { result };
+        }
+
+        static char ToHalfWidth(char character)
+        {
+            return character >= '！' && character <= '～' ? (char)(character - 0xfee0) : character;
+        }
+
+        static LabelSpec CreateSpecification(Match spec, Match quantity)
+        {
+            decimal low, high;
+            int count;
+            if (!decimal.TryParse(spec.Groups["low"].Value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out low) ||
+                !decimal.TryParse(spec.Groups["high"].Value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out high) ||
+                !int.TryParse(quantity.Groups["count"].Value.Replace('O', '0').Replace('o', '0').Replace('I', '1').Replace('l', '1'),
+                    NumberStyles.Integer, CultureInfo.InvariantCulture, out count) || low <= 0 || high < low || high > 10000 || count <= 0)
+                return null;
+            string color = spec.Groups["color"].Value;
+            int index = color == "红" || color == "紅" ? 0 : color == "绿" || color == "綠" ? 1 :
+                color == "蓝" || color == "藍" ? 2 : color == "白" ? 3 : 4;
+            return new LabelSpec { Color = index, Quantity = count, Minimum = low, Maximum = high };
         }
 
         static Reading[] ReadWords(string data)
@@ -350,25 +441,21 @@ namespace CrabWeighing
                     .OrderBy(hit => Math.Abs(hit.Y - spec.Y) + Math.Abs(hit.X - spec.X) * 1.35).FirstOrDefault();
                 if (quantity == null) continue;
                 quantities.Remove(quantity);
-                decimal low = decimal.Parse(spec.Match.Groups["low"].Value, CultureInfo.InvariantCulture);
-                decimal high = decimal.Parse(spec.Match.Groups["high"].Value, CultureInfo.InvariantCulture);
-                int count = int.Parse(quantity.Match.Groups["count"].Value.Replace('O', '0').Replace('o', '0'), CultureInfo.InvariantCulture);
-                if (low <= 0 || high < low || count <= 0) continue;
-                string color = spec.Match.Groups["color"].Value;
-                int index = color == "红" || color == "紅" ? 0 : color == "绿" || color == "綠" ? 1 : color == "蓝" || color == "藍" ? 2 : color == "白" ? 3 : 4;
-                var existing = result.FirstOrDefault(item => item.Color == index);
+                LabelSpec parsed = CreateSpecification(spec.Match, quantity.Match);
+                if (parsed == null) continue;
+                var existing = result.FirstOrDefault(item => item.Color == parsed.Color);
                 if (existing != null)
                 {
-                    if (existing.Minimum != low || existing.Maximum != high) continue;
-                    existing.Quantity += count;
+                    if (existing.Minimum != parsed.Minimum || existing.Maximum != parsed.Maximum) continue;
+                    existing.Quantity += parsed.Quantity;
                     if (existing.Quantity > 10000) throw new InvalidOperationException("同一绳色的目标数量超过上限。");
                     continue;
                 }
                 float left = (float)Math.Min(spec.X, quantity.X) - medianHeight * 2;
                 float right = (float)Math.Max(spec.Right, quantity.Right) + medianHeight;
-                result.Add(new LabelSpec { Color = index, Quantity = count, Minimum = low, Maximum = high,
-                    TextArea = RectangleF.FromLTRB(Math.Max(0, left), Math.Min(spec.Y, quantity.Y) - 3,
-                        right, Math.Max(spec.Y, quantity.Y) + medianHeight + 3) });
+                parsed.TextArea = RectangleF.FromLTRB(Math.Max(0, left), Math.Min(spec.Y, quantity.Y) - 3,
+                    right, Math.Max(spec.Y, quantity.Y) + medianHeight + 3);
+                result.Add(parsed);
             }
             return result.OrderBy(item => item.Color).ToArray();
         }
@@ -409,8 +496,7 @@ namespace CrabWeighing
             {
                 char character = word.Text[index];
                 if (char.IsWhiteSpace(character)) continue;
-                if (character >= '！' && character <= '～') character = (char)(character - 0xfee0);
-                text.Append(character);
+                text.Append(ToHalfWidth(character));
                 x.Add(word.X + index * word.Width / (double)Math.Max(1, word.Text.Length));
                 y.Add(word.Y);
             }

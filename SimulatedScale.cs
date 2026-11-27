@@ -16,6 +16,8 @@ namespace CrabWeighing
         long nextRead;
         WeightSample sample;
 
+        public double TargetGrams { get { return Math.Round(target, 1); } }
+
         public int[] Colors { get { return colors.ToArray(); } }
 
         public void Adjust(int color, int count, double[] reference)
@@ -39,6 +41,7 @@ namespace CrabWeighing
                 }
             target = weights.Sum();
             changedAt = now;
+            nextRead = 0;
         }
 
         public void Clear()

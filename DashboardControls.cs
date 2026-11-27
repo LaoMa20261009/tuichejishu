@@ -180,21 +180,18 @@ namespace CrabWeighing
                 ClientRectangle.Right - Padding.Right, ClientRectangle.Bottom - Padding.Bottom);
             if (Icon != ConsoleIcon.None)
             {
-                int unit = ConsolePaint.Pixels(this, 18), inset = ConsolePaint.Pixels(this, 9);
-                ConsolePaint.Tile(e.Graphics, ClientRectangle, inset, BackColor, Color.FromArgb(205, 222, 243));
+                int unit = ConsolePaint.Pixels(this, 15), inset = ConsolePaint.Pixels(this, 8);
+                var background = Parent == null ? BackColor : Parent.BackColor;
+                e.Graphics.Clear(background);
+                ConsolePaint.Tile(e.Graphics, ClientRectangle, inset, BackColor, BackColor);
                 ConsoleIcons.Draw(e.Graphics, Icon, new Rectangle(inset, (Height - unit) / 2, unit, unit), ForeColor);
-                ConsolePaint.Dot(e.Graphics, Width - 2 * inset, (Height - inset) / 2, inset, StatusDot);
+                int dot = ConsolePaint.Pixels(this, 6);
+                ConsolePaint.Dot(e.Graphics, Width - inset - dot, (Height - dot) / 2, dot, StatusDot);
                 int start = unit + 2 * inset;
-                int width = Width - start - 3 * inset;
-                int split = Text.IndexOf('\n');
-                string title = split < 0 ? Text : Text.Substring(0, split);
-                string status = split < 0 ? "" : Text.Substring(split + 1);
-                const TextFormatFlags badgeText = TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
-                    TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
-                using (var font = new Font(Font.FontFamily, ConsolePaint.Pixels(this, 14), FontStyle.Bold, GraphicsUnit.Pixel))
-                    TextRenderer.DrawText(e.Graphics, title, font, new Rectangle(start, 0, width, Height / 2 + inset / 2), ForeColor, badgeText);
+                string text = Text.Replace("\n", " · ");
                 using (var font = new Font(Font.FontFamily, ConsolePaint.Pixels(this, 13), FontStyle.Regular, GraphicsUnit.Pixel))
-                    TextRenderer.DrawText(e.Graphics, status, font, new Rectangle(start, Height / 2, width, Height / 2 - inset / 3), ForeColor, badgeText);
+                    ConsolePaint.DrawFittedText(e.Graphics, text, font, new Rectangle(start, 0, Width - start - inset * 2 - dot, Height),
+                        ForeColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
                 return;
             }
             if (RoundedFill && Parent != null && BackColor != Color.Transparent)
@@ -208,7 +205,7 @@ namespace CrabWeighing
             else flags |= TextFormatFlags.Left;
             if (FitText) ConsolePaint.DrawFittedText(e.Graphics, Text, Font, box, ForeColor, flags);
             else TextRenderer.DrawText(e.Graphics, Text, Font, box, ForeColor,
-                flags | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+                flags | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         }
     }
 
@@ -351,12 +348,24 @@ namespace CrabWeighing
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            Color text = Color.FromArgb(11, 28, 48), primary = Color.FromArgb(0, 97, 148);
+            Color text = Color.FromArgb(11, 28, 48), primary = Color.FromArgb(0, 84, 166);
             Color green = Color.FromArgb(0, 105, 71), faint = Color.FromArgb(226, 236, 251);
-            e.Graphics.Clear(Parent == null ? BackColor : Parent.BackColor);
-            ConsolePaint.Tile(e.Graphics, ClientRectangle, ConsolePaint.Pixels(this, 11), active ? Color.FromArgb(238, 246, 255) :
-                Color.White, active ? primary : faint);
+            Color selected = Color.FromArgb(222, 239, 255);
             Func<int, int> px = value => ConsolePaint.Pixels(this, value);
+            e.Graphics.Clear(Parent == null ? BackColor : Parent.BackColor);
+            var body = new Rectangle(px(1), px(1), Width - px(13), Height - px(2));
+            ConsolePaint.Tile(e.Graphics, body, px(10), active ? selected : Color.White,
+                active ? primary : faint, active ? px(2) : 1);
+            if (active)
+            {
+                int right = body.Right - 1, middle = Height / 2, arrow = px(9);
+                var points = new[] { new Point(right - 1, middle - arrow), new Point(right + arrow, middle),
+                    new Point(right - 1, middle + arrow) };
+                using (var brush = new SolidBrush(selected)) e.Graphics.FillPolygon(brush, points);
+                using (var pen = new Pen(primary, px(2))) e.Graphics.DrawLines(pen, points);
+                var accent = new Rectangle(px(2), px(14), px(5), Height - px(28));
+                ConsolePaint.Tile(e.Graphics, accent, px(2), primary, primary);
+            }
             ConsolePaint.Dot(e.Graphics, px(13), px(14), px(38), fill);
             ConsolePaint.Dot(e.Graphics, px(23), px(24), px(18), ink);
             using (var title = new Font(Font.FontFamily, px(16), FontStyle.Bold, GraphicsUnit.Pixel))
@@ -367,7 +376,8 @@ namespace CrabWeighing
                 TextRenderer.DrawText(e.Graphics, colorName + " · " + spec, title,
                     new Rectangle(px(61), px(10), Math.Max(1, Width - px(203)), px(25)), active ? primary : text, left);
                 Color hint = Color.FromArgb(86, 100, 119);
-                TextRenderer.DrawText(e.Graphics, status + " · 剩余 " + Math.Max(0, goal - current) + " 只", note,
+                string detail = active ? "已选 · " + status : status;
+                TextRenderer.DrawText(e.Graphics, detail + " · 剩余 " + Math.Max(0, goal - current) + " 只", note,
                     new Rectangle(px(61), px(38), Math.Max(1, Width - px(166)), px(20)), hint, left);
                 TextRenderer.DrawText(e.Graphics, numbers, figure,
                     new Rectangle(Width - px(139), px(10), px(125), px(29)), goal > 0 && current >= goal ? green : primary,
@@ -377,7 +387,7 @@ namespace CrabWeighing
                         new Rectangle(Width - px(100), px(39), px(86), px(19)), green,
                         TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
             }
-            var track = new Rectangle(px(13), Height - px(20), Math.Max(1, Width - px(26)), px(8));
+            var track = new Rectangle(px(13), Height - px(20), Math.Max(1, Width - px(39)), px(8));
             ConsolePaint.Tile(e.Graphics, track, px(4), faint, faint);
             if (goal > 0 && current > 0)
             {

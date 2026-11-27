@@ -149,51 +149,55 @@ namespace CrabWeighing
             {
                 while (!cancellation.IsCancellationRequested)
                 {
-                    var pixels = new byte[VideoFrame.ByteCount];
-                    using (var bitmap = new Bitmap(VideoFrame.Width, VideoFrame.Height, PixelFormat.Format24bppRgb))
-                    {
-                        using (Graphics graphics = Graphics.FromImage(bitmap))
-                        {
-                            graphics.Clear(Color.FromArgb(25, 43, 49));
-                            graphics.FillRectangle(Brushes.Gainsboro, 107, 42, 426, 276);
-                            graphics.FillRectangle(Brushes.DarkSlateGray, 123, 58, 394, 244);
-                            int[] colors = getCount();
-                            if (colors.Length > 0)
-                            {
-                                using (var shell = new SolidBrush(Color.FromArgb(90, 75, 59)))
-                                using (var red = new Pen(Color.Firebrick, 5))
-                                using (var green = new Pen(Color.LimeGreen, 5))
-                                using (var blue = new Pen(Color.RoyalBlue, 5))
-                                using (var white = new Pen(Color.Ivory, 5))
-                                using (var yellow = new Pen(Color.Gold, 5))
-                                {
-                                    var ropes = new[] { red, green, blue, white, yellow };
-                                    bool compact = colors.Length > 12;
-                                    int columns = compact ? 8 : 4;
-                                    int cellWidth = compact ? 47 : 95, cellHeight = compact ? 47 : 76;
-                                    int shellWidth = compact ? 42 : 83, shellHeight = compact ? 39 : 62;
-                                    int ropeWidth = compact ? 30 : 61, ropeHeight = compact ? 27 : 44;
-                                    for (int i = 0; i < Math.Min(colors.Length, DemoCapacity); i++)
-                                    {
-                                        int x = 135 + i % columns * cellWidth, y = 65 + i / columns * cellHeight;
-                                        graphics.FillEllipse(shell, x, y, shellWidth, shellHeight);
-                                        graphics.DrawEllipse(ropes[colors[i]], x + (shellWidth - ropeWidth) / 2,
-                                            y + (shellHeight - ropeHeight) / 2, ropeWidth, ropeHeight);
-                                    }
-                                }
-                            }
-                        }
-                        var data = bitmap.LockBits(new Rectangle(0, 0, VideoFrame.Width, VideoFrame.Height),
-                            ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
-                        try { Marshal.Copy(data.Scan0, pixels, 0, pixels.Length); }
-                        finally { bitmap.UnlockBits(data); }
-                    }
-                    Interlocked.Exchange(ref latest, new VideoFrame(pixels));
+                    Interlocked.Exchange(ref latest, DrawDemoFrame(getCount()));
                     if (cancellation.Token.WaitHandle.WaitOne(100)) break;
                 }
             }
             catch (Exception) { error = "无法生成演示视频。"; }
             finally { cancellation.Dispose(); }
+        }
+
+        internal static VideoFrame DrawDemoFrame(int[] colors)
+        {
+            var pixels = new byte[VideoFrame.ByteCount];
+            using (var bitmap = new Bitmap(VideoFrame.Width, VideoFrame.Height, PixelFormat.Format24bppRgb))
+            {
+                using (Graphics graphics = Graphics.FromImage(bitmap))
+                {
+                    graphics.Clear(Color.FromArgb(25, 43, 49));
+                    graphics.FillRectangle(Brushes.Gainsboro, 107, 42, 426, 276);
+                    graphics.FillRectangle(Brushes.DarkSlateGray, 123, 58, 394, 244);
+                    if (colors.Length > 0)
+                    {
+                        using (var shell = new SolidBrush(Color.FromArgb(90, 75, 59)))
+                        using (var red = new Pen(Color.Firebrick, 5))
+                        using (var green = new Pen(Color.LimeGreen, 5))
+                        using (var blue = new Pen(Color.RoyalBlue, 5))
+                        using (var white = new Pen(Color.Ivory, 5))
+                        using (var yellow = new Pen(Color.Gold, 5))
+                        {
+                            var ropes = new[] { red, green, blue, white, yellow };
+                            bool compact = colors.Length > 12;
+                            int columns = compact ? 8 : 4;
+                            int cellWidth = compact ? 47 : 95, cellHeight = compact ? 47 : 76;
+                            int shellWidth = compact ? 42 : 83, shellHeight = compact ? 39 : 62;
+                            int ropeWidth = compact ? 30 : 61, ropeHeight = compact ? 27 : 44;
+                            for (int i = 0; i < Math.Min(colors.Length, DemoCapacity); i++)
+                            {
+                                int x = 135 + i % columns * cellWidth, y = 65 + i / columns * cellHeight;
+                                graphics.FillEllipse(shell, x, y, shellWidth, shellHeight);
+                                graphics.DrawEllipse(ropes[colors[i]], x + (shellWidth - ropeWidth) / 2,
+                                    y + (shellHeight - ropeHeight) / 2, ropeWidth, ropeHeight);
+                            }
+                        }
+                    }
+                }
+                var data = bitmap.LockBits(new Rectangle(0, 0, VideoFrame.Width, VideoFrame.Height),
+                    ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+                try { Marshal.Copy(data.Scan0, pixels, 0, pixels.Length); }
+                finally { bitmap.UnlockBits(data); }
+            }
+            return new VideoFrame(pixels);
         }
 
         // ProcessStartInfo.Arguments receives a Windows command line, not a shell command.
