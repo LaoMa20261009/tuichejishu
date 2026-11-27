@@ -19,24 +19,55 @@ namespace CrabWeighing
             return new Font(source.FontFamily, Pixels(control, (int)source.Size), source.Style, source.Unit);
         }
 
-        public static void Tile(Graphics graphics, Rectangle box, int radius, Color fill, Color border)
+        public static void Tile(Graphics graphics, Rectangle box, int radius, Color fill, Color border, int strokeWidth = 1)
         {
             if (box.Width <= 1 || box.Height <= 1) return;
             SmoothingMode smoothing = graphics.SmoothingMode;
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            int diameter = Math.Min(radius * 2, Math.Min(box.Width - 1, box.Height - 1));
-            using (var path = new GraphicsPath())
+            using (var path = RoundedPath(box, radius))
             {
-                int right = box.Right - 1, bottom = box.Bottom - 1;
-                path.AddArc(box.X, box.Y, diameter, diameter, 180, 90);
-                path.AddArc(right - diameter, box.Y, diameter, diameter, 270, 90);
-                path.AddArc(right - diameter, bottom - diameter, diameter, diameter, 0, 90);
-                path.AddArc(box.X, bottom - diameter, diameter, diameter, 90, 90);
-                path.CloseFigure();
                 using (var brush = new SolidBrush(fill)) graphics.FillPath(brush, path);
-                using (var pen = new Pen(border)) graphics.DrawPath(pen, path);
+                using (var pen = new Pen(border, strokeWidth)) graphics.DrawPath(pen, path);
             }
             graphics.SmoothingMode = smoothing;
+        }
+
+        static GraphicsPath RoundedPath(Rectangle box, int radius)
+        {
+            var path = new GraphicsPath();
+            int diameter = Math.Min(radius * 2, Math.Min(box.Width - 1, box.Height - 1));
+            int right = box.Right - 1, bottom = box.Bottom - 1;
+            path.AddArc(box.X, box.Y, diameter, diameter, 180, 90);
+            path.AddArc(right - diameter, box.Y, diameter, diameter, 270, 90);
+            path.AddArc(right - diameter, bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(box.X, bottom - diameter, diameter, diameter, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        public static void RoundEdges(Control control, int radius)
+        {
+            EventHandler apply = (sender, e) =>
+            {
+                if (control.Width < 2 || control.Height < 2) return;
+                int corner = Math.Min(Pixels(control, radius), Math.Min(control.Width, control.Height) / 2);
+                var region = new Region(new Rectangle(0, corner, control.Width, control.Height - 2 * corner));
+                // Keep the native clip as rectangles so large windows do not require a full-size path mask.
+                for (int y = 0; y < corner; y++)
+                {
+                    double dy = corner - y - 0.5;
+                    int inset = (int)Math.Round(corner - Math.Sqrt(corner * corner - dy * dy));
+                    int width = control.Width - 2 * inset;
+                    region.Union(new Rectangle(inset, y, width, 1));
+                    region.Union(new Rectangle(inset, control.Height - y - 1, width, 1));
+                }
+                var prior = control.Region;
+                control.Region = region;
+                if (prior != null) prior.Dispose();
+            };
+            control.SizeChanged += apply;
+            control.ParentChanged += apply;
+            apply(control, EventArgs.Empty);
         }
 
         public static void DrawFittedText(Graphics graphics, string text, Font font, Rectangle bounds,
@@ -131,6 +162,7 @@ namespace CrabWeighing
     {
         public ConsoleIcon Icon { get; set; }
         public bool FitText { get; set; }
+        public bool RoundedFill { get; set; }
         Color statusDot;
         public Color StatusDot
         {
@@ -164,6 +196,11 @@ namespace CrabWeighing
                 using (var font = new Font(Font.FontFamily, ConsolePaint.Pixels(this, 13), FontStyle.Regular, GraphicsUnit.Pixel))
                     TextRenderer.DrawText(e.Graphics, status, font, new Rectangle(start, Height / 2, width, Height / 2 - inset / 3), ForeColor, badgeText);
                 return;
+            }
+            if (RoundedFill && Parent != null && BackColor != Color.Transparent)
+            {
+                e.Graphics.Clear(Parent.BackColor);
+                ConsolePaint.Tile(e.Graphics, ClientRectangle, ConsolePaint.Pixels(this, 7), BackColor, BackColor);
             }
             var flags = TextFormatFlags.VerticalCenter;
             if (TextAlign == ContentAlignment.MiddleCenter) flags |= TextFormatFlags.HorizontalCenter;
@@ -244,7 +281,7 @@ namespace CrabWeighing
         {
             Color fill = Enabled && hover ? ControlPaint.Light(BackColor, 0.12F) : BackColor;
             e.Graphics.Clear(Parent == null ? fill : Parent.BackColor);
-            ConsolePaint.Tile(e.Graphics, ClientRectangle, ConsolePaint.Pixels(this, 7), fill, ControlPaint.Light(fill, 0.22F));
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, ConsolePaint.Pixels(this, 9), fill, ControlPaint.Light(fill, 0.22F));
             Color ink = Enabled ? ForeColor : Color.FromArgb(128, 144, 165);
             Rectangle text = ClientRectangle;
             if (Icon != ConsoleIcon.None)
@@ -317,7 +354,7 @@ namespace CrabWeighing
             Color text = Color.FromArgb(11, 28, 48), primary = Color.FromArgb(0, 97, 148);
             Color green = Color.FromArgb(0, 105, 71), faint = Color.FromArgb(226, 236, 251);
             e.Graphics.Clear(Parent == null ? BackColor : Parent.BackColor);
-            ConsolePaint.Tile(e.Graphics, ClientRectangle, 8, active ? Color.FromArgb(238, 246, 255) :
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, ConsolePaint.Pixels(this, 11), active ? Color.FromArgb(238, 246, 255) :
                 Color.White, active ? primary : faint);
             Func<int, int> px = value => ConsolePaint.Pixels(this, value);
             ConsolePaint.Dot(e.Graphics, px(13), px(14), px(38), fill);
@@ -329,15 +366,9 @@ namespace CrabWeighing
                 const TextFormatFlags left = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
                 TextRenderer.DrawText(e.Graphics, colorName + " · " + spec, title,
                     new Rectangle(px(61), px(10), Math.Max(1, Width - px(203)), px(25)), active ? primary : text, left);
-                var badge = new Rectangle(px(61), px(38), px(86), px(20));
-                Color statusInk = current > goal ? Color.FromArgb(153, 27, 27) : current == goal && goal > 0 ? green : primary;
-                Color statusFill = current > goal ? Color.FromArgb(255, 225, 225) : current == goal && goal > 0 ?
-                    Color.FromArgb(213, 245, 231) : Color.FromArgb(222, 235, 252);
-                ConsolePaint.Tile(e.Graphics, badge, px(4), statusFill, statusFill);
-                TextRenderer.DrawText(e.Graphics, status, note, badge, statusInk,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                TextRenderer.DrawText(e.Graphics, "剩余 " + Math.Max(0, goal - current) + " 只", note,
-                    new Rectangle(px(153), px(38), Math.Max(1, Width - px(245)), px(20)), text, left);
+                Color hint = Color.FromArgb(86, 100, 119);
+                TextRenderer.DrawText(e.Graphics, status + " · 剩余 " + Math.Max(0, goal - current) + " 只", note,
+                    new Rectangle(px(61), px(38), Math.Max(1, Width - px(166)), px(20)), hint, left);
                 TextRenderer.DrawText(e.Graphics, numbers, figure,
                     new Rectangle(Width - px(139), px(10), px(125), px(29)), goal > 0 && current >= goal ? green : primary,
                     TextFormatFlags.Right | TextFormatFlags.VerticalCenter);

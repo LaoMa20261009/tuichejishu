@@ -38,7 +38,7 @@ namespace CrabWeighing
         readonly Button browseVideo = ActionButton("选择视频");
         readonly Button cameraButton = ActionButton("连接视频");
         readonly Label cameraStatus = Note("视频未连接");
-        readonly Label referenceStatus = Note("");
+        readonly Label referenceStatus = Hint("");
         double[] appliedReferences;
         readonly TextBox[] productNames = new TextBox[Basket.Colors.Length];
         readonly TextBox[] minimumWeights = new TextBox[Basket.Colors.Length];
@@ -64,22 +64,21 @@ namespace CrabWeighing
         readonly CheckBox demoScale = new CheckBox { Text = "使用模拟秤", AutoSize = false, Margin = new Padding(8, 7, 4, 3) };
         readonly Button scaleButton = ActionButton("连接秤");
         readonly NumericUpDown crabCount = Amount(0, 0, 0, CameraSession.DemoCapacity, 1);
-        readonly CheckBox cycleLoads = new CheckBox { Text = "自动投放", AutoSize = false,
+        readonly CheckBox cycleLoads = new CheckBox { Text = "自动演示", AutoSize = false,
             Margin = new Padding(10, 7, 4, 3) };
         Panel simulationControls;
         readonly Label demoReadout = Heading("— g");
-        readonly Label demoHint = Note("");
-        readonly Label serialHint = Note("选择设备端口和通信协议后连接电子秤。");
+        readonly Label demoHint = Hint("");
+        readonly Label serialHint = Hint("选择设备端口和通信协议后连接电子秤。");
         readonly Random demoBatches = new Random();
-        FlowLayoutPanel serialControls;
+        Panel serialControls;
         Size? fixedWindowSize;
         Control dragControl;
         Point dragOffset;
         readonly SimulatedScale simulatedScale = new SimulatedScale();
         readonly Label weightValue = Note("—");
         readonly Label scaleStatus = Note("秤未连接");
-        readonly Label captureStatus = Note("等待视频与称重数据");
-        readonly CheckBox automatic = new CheckBox { Text = "自动记录", Checked = true, AutoSize = true, Margin = new Padding(8, 7, 4, 3) };
+        readonly Label captureStatus = Hint("等待视频与称重数据");
         const double EmptyLimit = 5;
         const double WeightTolerance = 1;
         readonly Timer timer = new Timer { Interval = 100 };
@@ -104,7 +103,7 @@ namespace CrabWeighing
         double lastUnclassifiedWeight = double.NaN;
         int unclassifiedMoves;
         long nextDemoStep;
-        bool changingDemoCount;
+        bool changingDemoCount, demoRemovalDone;
         long cameraStarted;
         long lastPoll;
         long lastAnalysis;
@@ -125,6 +124,7 @@ namespace CrabWeighing
             StartPosition = FormStartPosition.Manual;
             Rectangle openingBounds = ConsoleLayout.WindowBounds(Screen.FromPoint(Cursor.Position).Bounds);
             ClientSize = ConsoleLayout.DesignSize;
+            ConsolePaint.RoundEdges(this, 12);
             Font = new Font("Microsoft YaHei UI", 17, FontStyle.Regular, GraphicsUnit.Pixel);
             BackColor = Surface;
             ForeColor = Ink;
@@ -185,14 +185,7 @@ namespace CrabWeighing
             crabCount.ValueChanged += (s, e) =>
             {
                 if (changingDemoCount || !simulationOpen) return;
-                cycleLoads.Checked = false;
-                var colors = simulatedScale.Colors;
-                int change = (int)crabCount.Value - colors.Length;
-                int color = change < 0 && colors.Length > 0 ? colors[colors.Length - 1] : NextDemoColor();
-                if (color < 0) color = colors.Length > 0 ? colors[colors.Length - 1] : 0;
-                if (change < 0) change = -Math.Min(-change, colors.Count(item => item == color));
-                simulatedScale.Adjust(color, change, appliedReferences);
-                UpdateDemoCount();
+                AdjustDemoCrabs((int)crabCount.Value - simulationColors.Length);
             };
             cycleLoads.CheckedChanged += (s, e) =>
             {
@@ -201,8 +194,7 @@ namespace CrabWeighing
             LoadSettings();
             LoadReferences();
             ApplySpecInputs();
-            automatic.CheckedChanged += (s, e) => ResetCandidates();
-            tareButton.Click += (s, e) => AdjustScaleZero(true);
+            tareButton.Click += (s, e) => AdjustTare();
             preview.Paint += DrawArea;
             preview.MouseDown += BeginSelection;
             preview.MouseMove += MoveSelection;
@@ -218,15 +210,8 @@ namespace CrabWeighing
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            int thickness = ConsolePaint.Pixels(this, 3);
-            Rectangle frame = ClientRectangle;
-            using (var stroke = new SolidBrush(Color.FromArgb(36, 87, 137)))
-            {
-                e.Graphics.FillRectangle(stroke, 0, 0, frame.Width, thickness);
-                e.Graphics.FillRectangle(stroke, 0, frame.Bottom - thickness, frame.Width, thickness);
-                e.Graphics.FillRectangle(stroke, 0, 0, thickness, frame.Height);
-                e.Graphics.FillRectangle(stroke, frame.Right - thickness, 0, thickness, frame.Height);
-            }
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, ConsolePaint.Pixels(this, 12), BackColor,
+                Color.FromArgb(36, 87, 137), ConsolePaint.Pixels(this, 4));
         }
 
         protected override void SetBoundsCore(int x, int y, int width, int height, BoundsSpecified specified)
@@ -477,6 +462,7 @@ namespace CrabWeighing
                     scale.Close();
                     simulationOpen = false;
                     cycleLoads.Checked = false;
+                    demoRemovalDone = false;
                     simulatedScale.Clear();
                     UpdateDemoCount();
                 }
@@ -590,7 +576,7 @@ namespace CrabWeighing
             }
 
             if (simulationOpen && cycleLoads.Checked && camera != null && packingActive && !choosingOrder &&
-                automatic.Checked && order != null && !order.Finished && baselineFrame != null &&
+                order != null && !order.Finished && baselineFrame != null &&
                 unclassifiedMoves == 0)
                 UpdateAutomaticLoad(now);
 
@@ -613,6 +599,18 @@ namespace CrabWeighing
             return sample;
         }
 
+        void AdjustDemoCrabs(int change)
+        {
+            if (!simulationOpen || change == 0) return;
+            cycleLoads.Checked = false;
+            int color = change < 0 && simulationColors.Length > 0 ?
+                simulationColors[simulationColors.Length - 1] : NextDemoColor();
+            if (color < 0) color = simulationColors.Length > 0 ? simulationColors[simulationColors.Length - 1] : 0;
+            change = Math.Min(change, (int)crabCount.Maximum - simulationColors.Length);
+            simulatedScale.Adjust(color, change, appliedReferences);
+            UpdateDemoCount();
+        }
+
         int NextDemoColor()
         {
             if (order == null) return 0;
@@ -627,10 +625,21 @@ namespace CrabWeighing
             {
                 if (now < nextDemoStep || simulationColors.Length != baselineCounts.Sum()) return;
                 int color = NextDemoColor();
-                if (color < 0 || simulationColors.Length >= (int)crabCount.Maximum) return;
-                int limit = Math.Min(4, Math.Min(order.Goals[color] - order.Counts[color],
-                    (int)crabCount.Maximum - simulationColors.Length));
-                simulatedScale.Adjust(color, demoBatches.Next(1, limit + 1), appliedReferences);
+                if (color < 0) return;
+                if (!demoRemovalDone && simulationColors.Length > 0)
+                {
+                    int lastColor = simulationColors[simulationColors.Length - 1];
+                    int available = simulationColors.Count(item => item == lastColor);
+                    simulatedScale.Adjust(lastColor, -demoBatches.Next(1, Math.Min(4, available) + 1), appliedReferences);
+                    demoRemovalDone = true;
+                }
+                else
+                {
+                    int limit = Math.Min(4, Math.Min(order.Goals[color] - order.Counts[color],
+                        (int)crabCount.Maximum - simulationColors.Length));
+                    if (limit <= 0) return;
+                    simulatedScale.Adjust(color, demoBatches.Next(1, limit + 1), appliedReferences);
+                }
                 UpdateDemoCount();
                 nextDemoStep = now + 4 * Stopwatch.Frequency;
                 return;
@@ -826,7 +835,6 @@ namespace CrabWeighing
             if (choosingOrder || importingLabel || !packingActive) return;
             if (order != null && order.Finished) { captureStatus.Text = "装箱已完成"; return; }
             if (order == null) { captureStatus.Text = "请先扫码选择工单"; return; }
-            if (!automatic.Checked) { captureStatus.Text = "自动记录已暂停"; ResetCandidates(); return; }
             if (camera != null && camera.Source == CameraSource.Demo && !simulationOpen)
             {
                 captureStatus.Text = "演示画面需要模拟秤";
@@ -1081,23 +1089,22 @@ namespace CrabWeighing
             {
                 bool online = camera.Source == CameraSource.Network || camera.Source == CameraSource.Usb;
                 var badge = new Rectangle(px(9), px(9), px(48), px(20));
-                Color overlay = Color.FromArgb(15, 23, 42);
                 ConsolePaint.Tile(e.Graphics, badge, 4, online ? Color.FromArgb(139, 28, 52) :
                     Color.FromArgb(13, 84, 108), Color.FromArgb(44, 118, 142));
                 TextRenderer.DrawText(e.Graphics, online ? "LIVE" : "播放", Font, badge, Color.White,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                TextRenderer.DrawText(e.Graphics, info, Font, new Point(px(65), px(10)), Color.White, overlay);
+                TextRenderer.DrawText(e.Graphics, info, sourceHint.Font, new Point(px(65), px(10)), Color.LightGray);
                 if (analyzed != null)
                 {
                     var telemetry = new Rectangle(Math.Max(0, preview.Width - px(162)), px(9), px(151), px(21));
                     TextRenderer.DrawText(e.Graphics, "识别耗时 " + inferenceMs.ToString("F1") + " ms",
-                        Font, telemetry, Color.White, overlay, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+                        sourceHint.Font, telemetry, Color.LightGray, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
                     ConsolePaint.Dot(e.Graphics, px(12), preview.Height - px(75), px(7), RopeInk[1]);
                     TextRenderer.DrawText(e.Graphics, foundBox.IsEmpty ? "寻找白色泡沫箱" : "箱内绳色识别中",
-                        Font, new Point(px(25), preview.Height - px(82)), Color.White, overlay);
+                        sourceHint.Font, new Point(px(25), preview.Height - px(82)), Color.LightGray);
                 }
             }
-            else TextRenderer.DrawText(e.Graphics, info, Font, new Point(px(10), px(9)), Cyan, Surface);
+            else TextRenderer.DrawText(e.Graphics, info, sourceHint.Font, new Point(px(10), px(9)), Color.LightGray);
             if (displayed == null) return;
             Rectangle bounds = preview.FrameBounds;
             if (!foundBox.IsEmpty && !selectionStart.HasValue)
@@ -1177,6 +1184,14 @@ namespace CrabWeighing
         static Label Note(string text)
         {
             return new ConsoleLabel { Text = text, ForeColor = Muted, AutoSize = true, Margin = new Padding(3, 5, 4, 3) };
+        }
+
+        static Label Hint(string text)
+        {
+            var label = Note(text);
+            label.Font = new Font("Microsoft YaHei UI", 15, FontStyle.Regular, GraphicsUnit.Pixel);
+            label.BackColor = Color.Transparent;
+            return label;
         }
 
         static Label Heading(string text)
