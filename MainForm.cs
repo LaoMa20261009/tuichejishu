@@ -527,8 +527,13 @@ namespace CrabWeighing
                 string scaleConnection = simulationOpen ? "模拟" : !scale.IsOpen ? "未连接" :
                     ports.Text + (weight == null || !weight.Valid ? " · 待读数" : " · 在线");
                 string cameraConnection = camera == null ? "未连接" : camera.Ended ? "已停止" :
-                    displayed == null ? "等待画面" : cameraType.Text + " · 在线";
-                deviceStatus.Text = "电子秤  " + scaleConnection + "     工业相机  " + cameraConnection;
+                    displayed == null ? "等待画面" : cameraType.Text;
+                bool scaleReady = simulationOpen || (scale.IsOpen && weight != null && weight.Valid);
+                bool cameraReady = camera != null && !camera.Ended && displayed != null;
+                SetBadge(deviceStatus, RopeFill[scaleReady ? 1 : 2], scaleReady ? Green : Blue);
+                SetBadge(cameraBadge, RopeFill[cameraReady ? 1 : 2], cameraReady ? Green : Blue);
+                deviceStatus.Text = "电子秤  " + scaleConnection;
+                cameraBadge.Text = "工业相机  " + cameraConnection;
                 RefreshWorkflow(now, weight);
                 RefreshRecording(now, weight, frameTick);
             }
@@ -595,7 +600,7 @@ namespace CrabWeighing
                 }
                 sample = new WeightSample(grams - tare, "g", sample.Stable, true, 1, sample.Tick);
             }
-            weightValue.Text = sample == null || !sample.Valid ? "—" : sample.Number + " 克";
+            weightValue.Text = sample == null || !sample.Valid ? "—" : sample.Number;
             scaleStatus.Text = sample == null ? (scale.IsOpen ? "等待有效称重数据" : "秤未连接") :
                 !sample.Valid ? "称重数据无效" : sample.Stable ? "净重稳定" : "净重变化";
             return sample;
@@ -1042,9 +1047,9 @@ namespace CrabWeighing
                     var telemetry = new Rectangle(Math.Max(0, preview.Width - px(162)), px(9), px(151), px(21));
                     TextRenderer.DrawText(e.Graphics, "识别耗时 " + inferenceMs.ToString("F1") + " ms",
                         Font, telemetry, Color.White, overlay, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
-                    ConsolePaint.Dot(e.Graphics, px(12), preview.Height - px(22), px(7), RopeInk[1]);
+                    ConsolePaint.Dot(e.Graphics, px(12), preview.Height - px(75), px(7), RopeInk[1]);
                     TextRenderer.DrawText(e.Graphics, foundBox.IsEmpty ? "寻找白色泡沫箱" : "箱内绳色识别中",
-                        Font, new Point(px(25), preview.Height - px(29)), Color.White, overlay);
+                        Font, new Point(px(25), preview.Height - px(82)), Color.White, overlay);
                 }
             }
             else TextRenderer.DrawText(e.Graphics, info, Font, new Point(px(10), px(9)), Cyan, Surface);

@@ -138,6 +138,29 @@ namespace CrabWeighing
         }
     }
 
+    sealed class ProgressTrack : Control
+    {
+        int progress;
+
+        public ProgressTrack()
+        {
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        }
+
+        public int Value
+        {
+            set { progress = Math.Max(0, Math.Min(1000, value)); Invalidate(); }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Color track = Color.FromArgb(225, 235, 250), fill = Color.FromArgb(0, 105, 71);
+            int radius = Math.Max(1, Height / 2);
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, radius, track, track);
+            ConsolePaint.Tile(e.Graphics, new Rectangle(0, 0, Width * progress / 1000, Height), radius, fill, fill);
+        }
+    }
+
     sealed class GradeCard : Button
     {
         readonly string spec, colorName, numbers, status;
@@ -180,8 +203,15 @@ namespace CrabWeighing
                 const TextFormatFlags left = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
                 TextRenderer.DrawText(e.Graphics, colorName + " · " + spec, title,
                     new Rectangle(px(61), px(10), Math.Max(1, Width - px(203)), px(25)), active ? primary : text, left);
-                TextRenderer.DrawText(e.Graphics, status + "    剩余 " + Math.Max(0, goal - current) + " 只", note,
-                    new Rectangle(px(61), px(36), Math.Max(1, Width - px(141)), px(20)), active ? primary : text, left);
+                var badge = new Rectangle(px(61), px(38), px(86), px(20));
+                Color statusInk = current > goal ? Color.FromArgb(153, 27, 27) : current == goal && goal > 0 ? green : primary;
+                Color statusFill = current > goal ? Color.FromArgb(255, 225, 225) : current == goal && goal > 0 ?
+                    Color.FromArgb(213, 245, 231) : Color.FromArgb(222, 235, 252);
+                ConsolePaint.Tile(e.Graphics, badge, px(4), statusFill, statusFill);
+                TextRenderer.DrawText(e.Graphics, status, note, badge, statusInk,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                TextRenderer.DrawText(e.Graphics, "剩余 " + Math.Max(0, goal - current) + " 只", note,
+                    new Rectangle(px(153), px(38), Math.Max(1, Width - px(245)), px(20)), text, left);
                 TextRenderer.DrawText(e.Graphics, numbers, figure,
                     new Rectangle(Width - px(139), px(10), px(125), px(29)), goal > 0 && current >= goal ? green : primary,
                     TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
