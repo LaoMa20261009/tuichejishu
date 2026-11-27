@@ -12,10 +12,14 @@ namespace CrabWeighing
     sealed partial class MainForm : Form
     {
         static readonly Color Ink = Color.FromArgb(11, 28, 48);
-        static readonly Color Blue = Color.FromArgb(0, 97, 148);
+        static readonly Color Blue = Color.FromArgb(0, 84, 166);
+        static readonly Color Navy = Color.FromArgb(12, 33, 63);
+        static readonly Color Gauge = Color.FromArgb(16, 46, 80);
+        static readonly Color Ice = Color.FromArgb(161, 226, 255);
+        static readonly Color PaleBlue = Color.FromArgb(230, 241, 255);
         static readonly Color Cyan = Color.FromArgb(2, 132, 199);
         static readonly Color PanelColor = Color.White;
-        static readonly Color Surface = Color.FromArgb(245, 248, 255);
+        static readonly Color Surface = Color.FromArgb(240, 246, 254);
         static readonly Color Border = Color.FromArgb(213, 226, 245);
         static readonly Color Muted = Color.FromArgb(81, 95, 116);
         static readonly Color Green = Color.FromArgb(0, 105, 71);
@@ -116,6 +120,7 @@ namespace CrabWeighing
             Text = "螃蟹装箱计数系统";
             AutoSize = false;
             AutoScaleMode = AutoScaleMode.None;
+            SetStyle(ControlStyles.ResizeRedraw, true);
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
             Rectangle openingBounds = ConsoleLayout.WindowBounds(Screen.FromPoint(Cursor.Position).Bounds);
@@ -141,7 +146,7 @@ namespace CrabWeighing
             browseVideo.ForeColor = Color.White;
 
             SuspendLayout();
-            Place(CreateBanner(), 0, 0, 1280, 59);
+            Place(CreateBanner(), 3, 3, 1274, 56);
             Place(CreateLabelPage(), 14, 70, 1252, 716);
             Place(CreatePackingPage(), 14, 70, 1252, 716);
             CreateSettingsContent();
@@ -150,7 +155,7 @@ namespace CrabWeighing
             if (Math.Abs(factor - 1) > 0.001F)
             {
                 ScaleContents(this, factor);
-                ledger.ColumnHeadersHeight = (int)Math.Round(28 * factor);
+                ledger.ColumnHeadersHeight = (int)Math.Round(ledger.ColumnHeadersHeight * factor);
                 ledger.RowTemplate.Height = (int)Math.Round(42 * factor);
                 ScaleGridFont(ledger.ColumnHeadersDefaultCellStyle, factor);
                 ScaleGridFont(ledger.DefaultCellStyle, factor);
@@ -208,6 +213,20 @@ namespace CrabWeighing
             UpdateScaleInputs();
             ShowPackingPage(false);
             timer.Start();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            int thickness = ConsolePaint.Pixels(this, 3);
+            Rectangle frame = ClientRectangle;
+            using (var stroke = new SolidBrush(Color.FromArgb(36, 87, 137)))
+            {
+                e.Graphics.FillRectangle(stroke, 0, 0, frame.Width, thickness);
+                e.Graphics.FillRectangle(stroke, 0, frame.Bottom - thickness, frame.Width, thickness);
+                e.Graphics.FillRectangle(stroke, 0, 0, thickness, frame.Height);
+                e.Graphics.FillRectangle(stroke, frame.Right - thickness, 0, thickness, frame.Height);
+            }
         }
 
         protected override void SetBoundsCore(int x, int y, int width, int height, BoundsSpecified specified)
@@ -589,7 +608,6 @@ namespace CrabWeighing
                 }
                 sample = new WeightSample(grams - tare, "g", sample.Stable, true, 1, sample.Tick);
             }
-            weightValue.Text = sample == null || !sample.Valid ? "—" : sample.Number;
             scaleStatus.Text = sample == null ? (scale.IsOpen ? "等待有效称重数据" : "秤未连接") :
                 !sample.Valid ? "称重数据无效" : sample.Stable ? "净重稳定" : "净重变化";
             return sample;

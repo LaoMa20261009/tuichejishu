@@ -15,7 +15,6 @@ namespace CrabWeighing
     {
         readonly Panel labelPage = new Panel(), packingPage = new Panel();
         readonly CheckBox[] ruleEnabled = new CheckBox[Basket.Colors.Length];
-        readonly Button labelStep = ActionButton("1  标签识别"), packingStep = ActionButton("2  装箱核对");
         readonly TextBox taskNumber = new TextBox { Width = 186, MaxLength = 60, BorderStyle = BorderStyle.FixedSingle };
         readonly TextBox rawTranscript = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
             WordWrap = true, BorderStyle = BorderStyle.None };
@@ -42,7 +41,7 @@ namespace CrabWeighing
         Panel settingsContent;
         bool photoMode, choosingPhoto;
         LabelPhotoResult shownOcr;
-        string importedPhoto, captureFile, enteredBy;
+        string importedPhoto, captureFile, enteredBy, lastCompletedCode;
         readonly List<string> draftAudit = new List<string>();
         bool packingActive;
         int shownGrade = -1;
@@ -50,31 +49,29 @@ namespace CrabWeighing
 
         Control CreateBanner()
         {
-            var bar = new Panel { BackColor = PanelColor };
-            var icon = new Label { Text = "秤", TextAlign = ContentAlignment.MiddleCenter, BackColor = Blue, ForeColor = Color.White,
-                Font = new Font(Font.FontFamily, 20, FontStyle.Bold, GraphicsUnit.Pixel) };
+            var bar = new Panel { BackColor = Navy };
+            var icon = new Panel { BackColor = Blue };
+            icon.Paint += (sender, e) =>
+            {
+                int size = ConsolePaint.Pixels(icon, 25);
+                ConsoleIcons.Draw(e.Graphics, ConsoleIcon.Scale,
+                    new Rectangle((icon.Width - size) / 2, (icon.Height - size) / 2, size, size), Color.White);
+            };
             var title = Heading("螃蟹装箱计数系统");
             title.Font = new Font(Font.FontFamily, 24, FontStyle.Bold, GraphicsUnit.Pixel);
+            title.ForeColor = Color.White;
             var subtitle = Note("工业上位机装箱控制台");
             subtitle.Font = new Font(Font.FontFamily, 12, FontStyle.Regular, GraphicsUnit.Pixel);
-            At(bar, icon, 20, 12, 39, 36);
-            At(bar, title, 73, 7, 245, 26);
-            At(bar, subtitle, 74, 36, 221, 17);
+            subtitle.ForeColor = Ice;
+            At(bar, icon, 17, 8, 40, 40);
+            At(bar, title, 69, 4, 245, 26);
+            At(bar, subtitle, 70, 33, 221, 17);
             ((ConsoleLabel)deviceStatus).Icon = ConsoleIcon.Scale;
             ((ConsoleLabel)cameraBadge).Icon = ConsoleIcon.Camera;
-            ((ConsoleButton)labelStep).Icon = ConsoleIcon.Scan;
-            ((ConsoleButton)packingStep).Icon = ConsoleIcon.Box;
-            deviceStatus.AutoSize = false;
-            deviceStatus.BackColor = Color.FromArgb(237, 244, 255);
-            deviceStatus.TextAlign = ContentAlignment.MiddleCenter;
-            SetBadge(deviceStatus, Color.FromArgb(237, 244, 255), Blue);
-            SetBadge(cameraBadge, Color.FromArgb(237, 244, 255), Blue);
-            At(bar, deviceStatus, 374, 9, 166, 42);
-            At(bar, cameraBadge, 550, 9, 226, 42);
-            labelStep.Click += (s, e) => ShowPackingPage(false);
-            packingStep.Click += (s, e) => { if (order != null) ShowPackingPage(true); else BeginPacking(); };
-            At(bar, labelStep, 796, 7, 150, 45);
-            At(bar, packingStep, 952, 7, 150, 45);
+            SetBadge(deviceStatus, PaleBlue, Blue);
+            SetBadge(cameraBadge, PaleBlue, Blue);
+            At(bar, deviceStatus, 701, 7, 169, 42);
+            At(bar, cameraBadge, 882, 7, 212, 42);
             var settings = ActionButton("⚙");
             settings.AccessibleName = "系统配置";
             settings.Click += (s, e) => OpenSettings();
@@ -84,9 +81,11 @@ namespace CrabWeighing
             close.AccessibleName = "关闭";
             minimize.Click += (s, e) => WindowState = FormWindowState.Minimized;
             close.Click += (s, e) => Close();
-            At(bar, settings, 1115, 10, 45, 39);
-            At(bar, minimize, 1166, 10, 42, 39);
-            At(bar, close, 1213, 10, 45, 39);
+            foreach (var button in new[] { settings, minimize, close })
+                SetPrimary(button, Gauge);
+            At(bar, settings, 1111, 6, 46, 44);
+            At(bar, minimize, 1161, 6, 44, 44);
+            At(bar, close, 1209, 6, 46, 44);
             foreach (Control surface in new Control[] { bar, icon, title, subtitle, deviceStatus, cameraBadge }) EnableWindowDrag(surface);
             return bar;
         }
@@ -113,6 +112,16 @@ namespace CrabWeighing
             label.BackColor = background;
             label.ForeColor = foreground;
             label.TextAlign = ContentAlignment.MiddleCenter;
+        }
+
+        Control SectionTitle(string text)
+        {
+            var header = new Panel { BackColor = Color.Transparent };
+            var title = Heading(text);
+            title.ForeColor = Blue;
+            At(header, new Panel { BackColor = Cyan }, 0, 5, 3, 17);
+            At(header, title, 11, 0, 270, 27);
+            return header;
         }
 
         static void SetPrimary(Button button, Color background)
@@ -154,11 +163,11 @@ namespace CrabWeighing
             At(labelPage, labelImage, 0, 60, 730, 656);
             labelImage.Visible = false;
 
-            var videoActions = new Panel { BackColor = Color.FromArgb(17, 30, 43) };
+            var videoActions = new Panel { BackColor = Navy };
             sourceHint.ForeColor = Color.FromArgb(222, 234, 244);
             At(videoActions, sourceHint, 16, 12, 445, 30);
-            SetPrimary(captureLabels, Green);
-            SetPrimary(replacePhoto, Green);
+            SetPrimary(captureLabels, Blue);
+            SetPrimary(replacePhoto, Blue);
             captureLabels.Click += async (s, e) => await CaptureLabelFrame();
             At(videoActions, captureLabels, 484, 4, 216, 44);
             At(videoActions, replacePhoto, 484, 4, 216, 44);
@@ -168,7 +177,7 @@ namespace CrabWeighing
 
             At(labelPage, BuildWeightModule(false), 742, 0, 510, 155);
             var raw = Module();
-            At(raw, Heading("原始标签 OCR 识别内容"), 14, 10, 285, 25);
+            At(raw, SectionTitle("原始标签 OCR 识别内容"), 14, 10, 285, 25);
             toggleTranscript.Click += (s, e) => ShowOcrTranscript(!rawTranscript.Visible);
             At(raw, toggleTranscript, 340, 7, 80, 30);
             var copy = ActionButton("复制");
@@ -190,7 +199,7 @@ namespace CrabWeighing
             At(labelPage, raw, 742, 165, 510, 168);
 
             var parsed = Module();
-            At(parsed, Heading("标签解析规格列表"), 12, 10, 270, 25);
+            At(parsed, SectionTitle("标签解析规格列表"), 12, 10, 270, 25);
             At(parsed, Note("点按字段即可修改"), 344, 12, 152, 24);
             ConfigureSpecifications();
             At(parsed, specifications, 10, 45, 489, 221);
@@ -201,7 +210,7 @@ namespace CrabWeighing
             At(parsed, add, 11, 271, 174, 44);
             At(parsed, reset, 352, 271, 145, 44);
             At(labelPage, parsed, 742, 340, 510, 321);
-            SetPrimary(confirmLabels, Green);
+            SetPrimary(confirmLabels, Blue);
             confirmLabels.Click += (s, e) => BeginPacking();
             At(labelPage, confirmLabels, 742, 670, 510, 46);
             return labelPage;
@@ -212,67 +221,78 @@ namespace CrabWeighing
             var module = Module();
             var value = compact ? packingWeight : weightValue;
             var status = compact ? packingWeightState : weightState;
-            value.Font = new Font("Consolas", compact ? 37 : 44, FontStyle.Bold, GraphicsUnit.Pixel);
-            value.ForeColor = compact ? Blue : Ink;
+            var readout = new Panel { BackColor = Gauge };
+            readout.Paint += (sender, e) =>
+            {
+                ConsolePaint.Tile(e.Graphics, readout.ClientRectangle, ConsolePaint.Pixels(readout, 9),
+                    Gauge, Color.FromArgb(60, 128, 184));
+                int size = ConsolePaint.Pixels(readout, 20);
+                ConsoleIcons.Draw(e.Graphics, ConsoleIcon.Scale,
+                    new Rectangle(ConsolePaint.Pixels(readout, 13), ConsolePaint.Pixels(readout, 11), size, size), Ice);
+            };
+            var caption = Note("实时净重");
+            caption.ForeColor = Ice;
+            status.ForeColor = Ice;
+            value.Font = new Font("Consolas", compact ? 47 : 42, FontStyle.Bold, GraphicsUnit.Pixel);
+            value.ForeColor = Color.White;
+            value.TextAlign = ContentAlignment.MiddleRight;
+            ((ConsoleLabel)value).FitText = true;
+            var unit = Note("g");
+            SetBadge(unit, Navy, Ice);
             var zero = ActionButton("置零");
             var tareControl = compact ? ActionButton("去皮") : tareButton;
             zero.Click += (s, e) => AdjustScaleZero(false);
             if (compact) tareControl.Click += (s, e) => AdjustScaleZero(true);
+
+            At(readout, caption, 43, 8, 111, 27);
             if (compact)
             {
-                SetBadge(packingTask, Color.FromArgb(237, 244, 255), Blue);
-                packingTask.TextAlign = ContentAlignment.MiddleLeft;
-                packingTask.Padding = new Padding(12, 0, 8, 0);
-                packingTask.Font = new Font(Font.FontFamily, 17, FontStyle.Bold, GraphicsUnit.Pixel);
-                At(module, packingTask, 19, 14, 474, 43);
-                At(module, Heading("实时称重"), 612, 15, 112, 33);
-                At(module, status, 750, 17, 122, 28);
-                At(module, value, 849, 11, 156, 51);
-                At(module, Note("g"), 1008, 19, 31, 36);
-                At(module, zero, 1046, 12, 87, 46);
-                At(module, tareControl, 1142, 12, 87, 46);
+                var task = new Panel { BackColor = PaleBlue };
+                var taskCaption = Note("任务单号");
+                taskCaption.ForeColor = Blue;
+                packingTask.Font = new Font(Font.FontFamily, 20, FontStyle.Bold, GraphicsUnit.Pixel);
+                packingTask.ForeColor = Ink;
+                ((ConsoleLabel)packingTask).FitText = true;
+                At(task, taskCaption, 14, 8, 195, 23);
+                At(task, packingTask, 14, 33, 342, 38);
+                At(module, task, 12, 9, 371, 78);
+                At(readout, status, 15, 43, 164, 23);
+                At(readout, value, 188, 7, 393, 64);
+                At(readout, unit, 593, 23, 35, 32);
+                At(module, readout, 395, 9, 642, 78);
+                At(module, zero, 1048, 25, 88, 46);
+                At(module, tareControl, 1149, 25, 88, 46);
             }
             else
             {
-                At(module, Heading("实时电子秤数据"), 12, 10, 314, 27);
-                var setup = ActionButton("系统配置");
-                setup.Click += (s, e) => OpenSettings();
-                At(module, setup, 396, 6, 102, 34);
-                var readout = new Panel { BackColor = Color.FromArgb(240, 246, 255) };
-                readout.Paint += (s, e) => ConsolePaint.Tile(e.Graphics, readout.ClientRectangle,
-                    ConsolePaint.Pixels(readout, 7), readout.BackColor, Color.FromArgb(197, 218, 241));
-                var netWeight = Note("实时净重");
-                netWeight.ForeColor = Blue;
-                At(readout, netWeight, 13, 6, 121, 22);
-                value.TextAlign = ContentAlignment.MiddleRight;
-                At(readout, value, 14, 27, 200, 48);
-                var unit = Note("g");
-                SetBadge(unit, Color.White, Blue);
-                At(readout, unit, 225, 41, 32, 26);
-                At(readout, status, 14, 75, 243, 22);
-                At(module, readout, 12, 46, 280, 100);
-                At(module, zero, 307, 87, 88, 45);
-                At(module, tareControl, 406, 87, 88, 45);
+                At(module, SectionTitle("实时电子秤数据"), 13, 9, 314, 27);
+                At(readout, status, 156, 10, 160, 23);
+                At(readout, value, 14, 34, 253, 60);
+                At(readout, unit, 278, 50, 34, 28);
+                At(module, readout, 12, 43, 326, 101);
+                At(module, zero, 350, 44, 148, 45);
+                At(module, tareControl, 350, 98, 148, 45);
             }
             return module;
         }
 
         Control CreatePackingPage()
         {
-            At(packingPage, BuildWeightModule(true), 0, 0, 1252, 71);
+            At(packingPage, BuildWeightModule(true), 0, 0, 1252, 96);
             var deck = Module();
-            var left = new Panel { BackColor = Color.FromArgb(245, 248, 253) };
-            At(left, Heading("装箱规格步骤选择"), 16, 13, 390, 29);
+            var left = new Panel { BackColor = Surface };
+            At(left, SectionTitle("装箱规格"), 16, 13, 280, 29);
             gradeCards.Margin = Padding.Empty;
             gradeCards.BackColor = left.BackColor;
-            At(left, gradeCards, 10, 55, 446, 474);
+            At(left, gradeCards, 10, 55, 446, 445);
             var guide = Note("按规格放置螃蟹，点击卡片查看对应流水");
             SetBadge(guide, Color.FromArgb(233, 241, 253), Blue);
-            At(left, guide, 16, 536, 419, 30);
-            At(deck, left, 1, 1, 464, 572);
-            At(deck, new Panel { BackColor = Border }, 465, 1, 1, 572);
+            At(left, guide, 16, 505, 419, 30);
+            At(deck, left, 1, 1, 464, 546);
+            At(deck, new Panel { BackColor = Border }, 465, 1, 1, 546);
 
             var right = new Panel { BackColor = PanelColor };
+            ledgerTitle.ForeColor = Blue;
             At(right, ledgerTitle, 13, 11, 481, 29);
             SetBadge(ledgerCount, Color.FromArgb(231, 242, 255), Blue);
             At(right, ledgerCount, 516, 13, 237, 25);
@@ -280,25 +300,33 @@ namespace CrabWeighing
             StyleGrid(ledger, 43);
             ledger.ScrollBars = ScrollBars.Vertical;
             ledger.BackgroundColor = PanelColor;
+            ledger.ColumnHeadersHeight = 35;
+            ledger.ColumnHeadersDefaultCellStyle.BackColor = PaleBlue;
+            ledger.ColumnHeadersDefaultCellStyle.ForeColor = Blue;
             string[] names = { "计数序号", "记录时间", "操作动作", "变动只数", "重量变动", "累计重量" };
             for (int i = 0; i < names.Length; i++)
                 ledger.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = names[i],
-                    FillWeight = new[] { 116, 90, 128, 95, 120, 122 }[i], SortMode = DataGridViewColumnSortMode.NotSortable });
+                    FillWeight = new[] { 108, 87, 106, 90, 145, 144 }[i], SortMode = DataGridViewColumnSortMode.NotSortable });
             ledger.CellPainting += PaintLedgerCell;
             ledger.CellDoubleClick += (s, e) => OpenMoveEvidence(e.RowIndex);
             ledger.Dock = DockStyle.None;
-            At(right, ledger, 12, 73, 758, 490);
-            At(deck, right, 467, 1, 783, 572);
-            At(packingPage, deck, 0, 85, 1252, 574);
+            At(right, ledger, 12, 73, 758, 462);
+            At(deck, right, 467, 1, 783, 546);
+            At(packingPage, deck, 0, 108, 1252, 548);
 
             var footer = Module();
             At(footer, bannerProgress, 16, 4, 255, 24);
             completionRate.ForeColor = Green;
             At(footer, completionRate, 274, 4, 100, 24);
             At(footer, totalProgress, 16, 33, 362, 9);
-            SetPrimary(finishPacking, Green);
+            var back = ActionButton("返回标签识别");
+            ((ConsoleButton)back).Icon = ConsoleIcon.Scan;
+            back.Click += (s, e) => ShowPackingPage(false);
+            At(footer, back, 858, 4, 168, 42);
+            SetPrimary(finishPacking, Blue);
+            ((ConsoleButton)finishPacking).Icon = ConsoleIcon.Box;
             finishPacking.Click += (s, e) => CompletePacking();
-            At(footer, finishPacking, 1044, 6, 192, 42);
+            At(footer, finishPacking, 1044, 4, 192, 42);
             At(packingPage, footer, 0, 667, 1252, 49);
             return packingPage;
         }
@@ -769,10 +797,6 @@ namespace CrabWeighing
             packingPage.Visible = packing;
             if (packing) packingPage.BringToFront();
             else labelPage.BringToFront();
-            labelStep.BackColor = packing ? Color.FromArgb(237, 244, 255) : Blue;
-            labelStep.ForeColor = packing ? Blue : Color.White;
-            packingStep.BackColor = packing ? Blue : Color.FromArgb(237, 244, 255);
-            packingStep.ForeColor = packing ? Color.White : Blue;
             if (packing && order != null) UpdateOrderDisplay();
             ResetCandidates();
         }
@@ -789,7 +813,8 @@ namespace CrabWeighing
                 !cycleLoads.Checked ? "手动投放中 · 可开启自动投放" :
                 camera != null && camera.Source != CameraSource.Demo ? "按视频中识别到的取放改变模拟重量" :
                 packingActive ? "关闭设置后，按工单规格自动投放" : "可手动试重，自动投放在装箱页运行";
-            weightState.ForeColor = packingWeightState.ForeColor = weight != null && weight.Valid && weight.Stable ? Green : Muted;
+            weightState.ForeColor = packingWeightState.ForeColor = weight == null || !weight.Valid ? Ice :
+                weight.Stable ? Color.FromArgb(138, 243, 204) : Color.FromArgb(255, 222, 144);
             if (!packingActive && !photoMode && !choosingPhoto && !importingLabel && !labelImage.Visible &&
                 !choosingOrder && settingsContent.Parent == null && specifications.Rows.Count == 0 && now >= nextCapture &&
                 camera != null && !camera.Ended && camera.Source != CameraSource.Demo &&
@@ -803,6 +828,12 @@ namespace CrabWeighing
         async void CaptureAutomatically()
         {
             await CaptureLabelFrame();
+            if (!closing && lastCompletedCode != null && shownOcr != null && shownOcr.Barcodes.Length == 1 &&
+                shownOcr.Barcodes[0] == lastCompletedCode)
+            {
+                ClearDraft();
+                recognitionStatus.Text = "上一箱已完成 · 请更换箱子";
+            }
             if (!closing && !photoMode && specifications.Rows.Count == 0)
             {
                 labelImage.Visible = false;
@@ -842,9 +873,19 @@ namespace CrabWeighing
             try
             {
                 order.Finish();
-                UpdateOrderDisplay();
             }
-            catch (Exception ex) { MessageBox.Show(this, ex.Message, "完成装箱失败"); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "完成装箱失败");
+                return;
+            }
+            lastCompletedCode = order.Code;
+            // Give the operator time to exchange the box before the next automatic capture.
+            nextCapture = Stopwatch.GetTimestamp() + 8 * Stopwatch.Frequency;
+            ClearDraft();
+            ResetOrder();
+            SetBadge(recognitionStatus, PaleBlue, Blue);
+            recognitionStatus.Text = "装箱完成 · 请识别下一箱";
         }
 
         void UpdateOrderDisplay()
@@ -852,7 +893,7 @@ namespace CrabWeighing
             if (order == null) return;
             if (shownGrade < 0 && !order.Moves.Any(move => move.Color < 0))
                 shownGrade = Array.FindIndex(order.Goals, target => target > 0);
-            packingTask.Text = "任务单号  " + order.Code + (order.Finished ? " · 已完成" : "");
+            packingTask.Text = order.Code + (order.Finished ? " · 已完成" : "");
             RefreshGradeCards();
             LoadLedger();
             int goal = order.Goals.Sum(), packed = order.Counts.Sum();
@@ -947,8 +988,11 @@ namespace CrabWeighing
                 Rectangle chip = Rectangle.Inflate(bounds, -5, -9);
                 ConsolePaint.Tile(e.Graphics, chip, 5, plus ? RopeFill[e.ColumnIndex == 0 ? 2 : 1] : RopeFill[0], background);
             }
-            TextRenderer.DrawText(e.Graphics, Convert.ToString(e.Value), e.CellStyle.Font ?? Font, bounds, ink,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            string text = Convert.ToString(e.Value);
+            Font font = e.CellStyle.Font ?? Font;
+            const TextFormatFlags alignment = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
+            if (e.ColumnIndex >= 4) ConsolePaint.DrawFittedText(e.Graphics, text, font, bounds, ink, alignment);
+            else TextRenderer.DrawText(e.Graphics, text, font, bounds, ink, alignment | TextFormatFlags.EndEllipsis);
             using (var pen = new Pen(Border)) e.Graphics.DrawLine(pen, bounds.Left, bounds.Bottom - 1, bounds.Right, bounds.Bottom - 1);
             e.Handled = true;
         }

@@ -39,6 +39,31 @@ namespace CrabWeighing
             graphics.SmoothingMode = smoothing;
         }
 
+        public static void DrawFittedText(Graphics graphics, string text, Font font, Rectangle bounds,
+            Color ink, TextFormatFlags alignment)
+        {
+            if (bounds.Width <= 0 || bounds.Height <= 0) return;
+            const TextFormatFlags options = TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+            Size natural = TextRenderer.MeasureText(graphics, text, font, Size.Empty, options);
+            if (natural.Width <= bounds.Width)
+            {
+                TextRenderer.DrawText(graphics, text, font, bounds, ink, options | alignment);
+                return;
+            }
+
+            // TextRenderer rounds font sizes to device pixels. Recheck after scaling.
+            int size = Math.Max(1, (int)(font.SizeInPoints * bounds.Width / natural.Width));
+            for (; size > 0; size--)
+            {
+                using (var fitted = new Font(font.FontFamily, size, font.Style, GraphicsUnit.Point))
+                {
+                    if (TextRenderer.MeasureText(graphics, text, fitted, Size.Empty, options).Width > bounds.Width) continue;
+                    TextRenderer.DrawText(graphics, text, fitted, bounds, ink, options | alignment);
+                    return;
+                }
+            }
+        }
+
         public static void Dot(Graphics graphics, int x, int y, int diameter, Color color)
         {
             var smoothing = graphics.SmoothingMode;
@@ -105,6 +130,7 @@ namespace CrabWeighing
     sealed class ConsoleLabel : Label
     {
         public ConsoleIcon Icon { get; set; }
+        public bool FitText { get; set; }
         Color statusDot;
         public Color StatusDot
         {
@@ -139,11 +165,13 @@ namespace CrabWeighing
                     TextRenderer.DrawText(e.Graphics, status, font, new Rectangle(start, Height / 2, width, Height / 2 - inset / 3), ForeColor, badgeText);
                 return;
             }
-            var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
+            var flags = TextFormatFlags.VerticalCenter;
             if (TextAlign == ContentAlignment.MiddleCenter) flags |= TextFormatFlags.HorizontalCenter;
             else if (TextAlign == ContentAlignment.MiddleRight) flags |= TextFormatFlags.Right;
             else flags |= TextFormatFlags.Left;
-            TextRenderer.DrawText(e.Graphics, Text, Font, box, ForeColor, flags);
+            if (FitText) ConsolePaint.DrawFittedText(e.Graphics, Text, Font, box, ForeColor, flags);
+            else TextRenderer.DrawText(e.Graphics, Text, Font, box, ForeColor,
+                flags | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
         }
     }
 
