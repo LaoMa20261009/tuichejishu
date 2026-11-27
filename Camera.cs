@@ -41,6 +41,8 @@ namespace CrabWeighing
 
     sealed class CameraSession : IDisposable
     {
+        public const int DemoCapacity = 40;
+
         readonly object processLock = new object();
         readonly CancellationTokenSource cancellation = new CancellationTokenSource();
         readonly LocalVideo localVideo;
@@ -166,11 +168,17 @@ namespace CrabWeighing
                                 using (var yellow = new Pen(Color.Gold, 5))
                                 {
                                     var ropes = new[] { red, green, blue, white, yellow };
-                                    for (int i = 0; i < Math.Min(colors.Length, 12); i++)
+                                    bool compact = colors.Length > 12;
+                                    int columns = compact ? 8 : 4;
+                                    int cellWidth = compact ? 47 : 95, cellHeight = compact ? 47 : 76;
+                                    int shellWidth = compact ? 42 : 83, shellHeight = compact ? 39 : 62;
+                                    int ropeWidth = compact ? 30 : 61, ropeHeight = compact ? 27 : 44;
+                                    for (int i = 0; i < Math.Min(colors.Length, DemoCapacity); i++)
                                     {
-                                        int x = 135 + i % 4 * 95, y = 70 + i / 4 * 76;
-                                        graphics.FillEllipse(shell, x, y, 83, 62);
-                                        graphics.DrawEllipse(ropes[colors[i]], x + 11, y + 8, 61, 44);
+                                        int x = 135 + i % columns * cellWidth, y = 65 + i / columns * cellHeight;
+                                        graphics.FillEllipse(shell, x, y, shellWidth, shellHeight);
+                                        graphics.DrawEllipse(ropes[colors[i]], x + (shellWidth - ropeWidth) / 2,
+                                            y + (shellHeight - ropeHeight) / 2, ropeWidth, ropeHeight);
                                     }
                                 }
                             }

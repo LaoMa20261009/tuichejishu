@@ -23,8 +23,6 @@ namespace CrabWeighing
             Color.FromArgb(86, 106, 135), Color.FromArgb(137, 91, 0) };
         static readonly Color[] RopeFill = { Color.FromArgb(255, 233, 230), Color.FromArgb(223, 247, 235),
             Color.FromArgb(228, 241, 255), Color.FromArgb(235, 241, 250), Color.FromArgb(255, 246, 213) };
-        static readonly int[] DemoColors = { 0, 1, 2, 3, 1, 3, 2, 0 };
-        static readonly int[] DemoChanges = { 1, 2, 3, 4, -2, -4, -3, -1 };
         static readonly string[] DefaultNames = { "2.5两母蟹", "3.0两母蟹", "蓝绳蟹", "3.5两母蟹", "黄绳蟹" };
         static readonly int[] DefaultMin = { 115, 140, 140, 165, 100 };
         static readonly int[] DefaultMax = { 135, 160, 160, 185, 120 };
@@ -59,12 +57,16 @@ namespace CrabWeighing
         double inferenceMs;
         readonly ComboBox ports = new ComboBox { Width = 142, DropDownStyle = ComboBoxStyle.DropDown };
         readonly ComboBox protocol = Choice("主动上报", "被动查询", "数字 OP 盒");
-        readonly CheckBox demoScale = new CheckBox { Text = "模拟秤", AutoSize = true, Margin = new Padding(8, 7, 4, 3) };
+        readonly CheckBox demoScale = new CheckBox { Text = "使用模拟秤", AutoSize = false, Margin = new Padding(8, 7, 4, 3) };
         readonly Button scaleButton = ActionButton("连接秤");
-        readonly NumericUpDown crabCount = Amount(0, 0, 0, 12, 1);
-        readonly CheckBox cycleLoads = new CheckBox { Text = "自动放蟹", AutoSize = true,
+        readonly NumericUpDown crabCount = Amount(0, 0, 0, CameraSession.DemoCapacity, 1);
+        readonly CheckBox cycleLoads = new CheckBox { Text = "自动投放", AutoSize = false,
             Margin = new Padding(10, 7, 4, 3) };
-        FlowLayoutPanel simulationControls;
+        Panel simulationControls;
+        readonly Label demoReadout = Heading("— g");
+        readonly Label demoHint = Note("");
+        readonly Label serialHint = Note("选择设备端口和通信协议后连接电子秤。");
+        readonly Random demoBatches = new Random();
         FlowLayoutPanel serialControls;
         Size? fixedWindowSize;
         Control dragControl;
@@ -93,7 +95,6 @@ namespace CrabWeighing
         volatile int[] simulationColors = new int[0];
         Rectangle foundBox, previousBox;
         bool importingLabel;
-        int demoStep;
         long weightCandidateSince;
         double weightCandidate;
         double lastUnclassifiedWeight = double.NaN;
@@ -178,22 +179,19 @@ namespace CrabWeighing
             };
             crabCount.ValueChanged += (s, e) =>
             {
-                if (changingDemoCount) return;
+                if (changingDemoCount || !simulationOpen) return;
                 cycleLoads.Checked = false;
                 var colors = simulatedScale.Colors;
                 int change = (int)crabCount.Value - colors.Length;
-                int color = change < 0 && colors.Length > 0 ? colors[colors.Length - 1] : 0;
+                int color = change < 0 && colors.Length > 0 ? colors[colors.Length - 1] : NextDemoColor();
+                if (color < 0) color = colors.Length > 0 ? colors[colors.Length - 1] : 0;
                 if (change < 0) change = -Math.Min(-change, colors.Count(item => item == color));
                 simulatedScale.Adjust(color, change, appliedReferences);
                 UpdateDemoCount();
             };
             cycleLoads.CheckedChanged += (s, e) =>
             {
-                if (!cycleLoads.Checked) return;
-                demoStep = 0;
-                simulatedScale.Clear();
-                UpdateDemoCount();
-                nextDemoStep = Stopwatch.GetTimestamp() + 4 * Stopwatch.Frequency;
+                if (cycleLoads.Checked) nextDemoStep = Stopwatch.GetTimestamp() + 4 * Stopwatch.Frequency;
             };
             LoadSettings();
             LoadReferences();
@@ -467,6 +465,11 @@ namespace CrabWeighing
                 {
                     simulationOpen = true;
                     cycleLoads.Checked = true;
+                    if (camera == null)
+                    {
+                        cameraType.SelectedIndex = (int)CameraSource.Demo;
+                        ToggleCamera();
+                    }
                 }
                 else
                 {
@@ -511,8 +514,11 @@ namespace CrabWeighing
             demoScale.Enabled = !connected;
             ports.Enabled = protocol.Enabled = !connected && !demoScale.Checked;
             simulationControls.Visible = demoScale.Checked;
-            serialControls.Visible = !demoScale.Checked;
-            scaleButton.Text = connected ? "断开" : "连接";
+            serialControls.Visible = serialHint.Visible = !demoScale.Checked;
+            cycleLoads.Enabled = simulationOpen;
+            crabCount.Enabled = simulationOpen;
+            foreach (var button in simulationControls.Controls.OfType<Button>()) button.Enabled = simulationOpen;
+            scaleButton.Text = connected ? "断开秤" : demoScale.Checked ? "启动模拟秤" : "连接电子秤";
         }
 
         void RefreshDashboard()
@@ -564,33 +570,11 @@ namespace CrabWeighing
                 }
             }
 
-            if (simulationOpen && cycleLoads.Checked && camera != null && packingActive)
-            {
-                if (camera.Source == CameraSource.Demo && now >= nextDemoStep)
-                {
-                    simulatedScale.Adjust(DemoColors[demoStep], DemoChanges[demoStep], appliedReferences);
-                    demoStep = (demoStep + 1) % DemoChanges.Length;
-                    UpdateDemoCount();
-                    nextDemoStep = now + 6 * Stopwatch.Frequency;
-                }
-                else if (camera.Source != CameraSource.Demo && stableObservation != null &&
-                    matchingFrames >= 2 && analyzed != null && CaptureGate.Elapsed(now, analyzed.Tick) <= 0.65)
-                {
-                    int[] current = new int[Basket.Colors.Length];
-                    foreach (int color in simulatedScale.Colors) current[color]++;
-                    int[] changed = Enumerable.Range(0, Basket.Colors.Length).Where(i => current[i] != stableObservation.Counts[i]).ToArray();
-                    if (changed.Length == 1)
-                    {
-                        int color = changed[0];
-                        int change = stableObservation.Counts[color] - current[color];
-                        if (Math.Abs(change) <= 4 && stableObservation.Counts.Sum() <= 12)
-                        {
-                            simulatedScale.Adjust(color, change, appliedReferences);
-                            UpdateDemoCount();
-                        }
-                    }
-                }
-            }
+            if (simulationOpen && cycleLoads.Checked && camera != null && packingActive && !choosingOrder &&
+                automatic.Checked && order != null && !order.Finished && baselineFrame != null &&
+                unclassifiedMoves == 0)
+                UpdateAutomaticLoad(now);
+
             WeightSample sample = simulationOpen ? simulatedScale.Read(now)
                 : scale.IsOpen ? scale.Latest : null;
             if (sample != null && CaptureGate.Elapsed(now, sample.Tick) > 2.5) sample = null;
@@ -609,6 +593,43 @@ namespace CrabWeighing
             scaleStatus.Text = sample == null ? (scale.IsOpen ? "等待有效称重数据" : "秤未连接") :
                 !sample.Valid ? "称重数据无效" : sample.Stable ? "净重稳定" : "净重变化";
             return sample;
+        }
+
+        int NextDemoColor()
+        {
+            if (order == null) return 0;
+            for (int i = 0; i < order.Goals.Length; i++)
+                if (order.Counts[i] < order.Goals[i]) return i;
+            return -1;
+        }
+
+        void UpdateAutomaticLoad(long now)
+        {
+            if (camera.Source == CameraSource.Demo)
+            {
+                if (now < nextDemoStep || simulationColors.Length != baselineCounts.Sum()) return;
+                int color = NextDemoColor();
+                if (color < 0 || simulationColors.Length >= (int)crabCount.Maximum) return;
+                int limit = Math.Min(4, Math.Min(order.Goals[color] - order.Counts[color],
+                    (int)crabCount.Maximum - simulationColors.Length));
+                simulatedScale.Adjust(color, demoBatches.Next(1, limit + 1), appliedReferences);
+                UpdateDemoCount();
+                nextDemoStep = now + 4 * Stopwatch.Frequency;
+                return;
+            }
+            if (stableObservation == null || matchingFrames < 2 || analyzed == null ||
+                CaptureGate.Elapsed(now, analyzed.Tick) > 0.65) return;
+
+            int[] current = new int[Basket.Colors.Length];
+            foreach (int color in simulationColors) current[color]++;
+            int[] changed = Enumerable.Range(0, Basket.Colors.Length)
+                .Where(i => current[i] != stableObservation.Counts[i]).ToArray();
+            if (changed.Length != 1) return;
+
+            int changedColor = changed[0], change = stableObservation.Counts[changedColor] - current[changedColor];
+            if (Math.Abs(change) > 4 || stableObservation.Counts.Sum() > (int)crabCount.Maximum) return;
+            simulatedScale.Adjust(changedColor, change, appliedReferences);
+            UpdateDemoCount();
         }
 
         void UpdateDemoCount()
@@ -849,6 +870,7 @@ namespace CrabWeighing
                     return;
                 }
                 AcceptBaseline(counts, weight.Value);
+                nextDemoStep = now + Stopwatch.Frequency;
                 captureStatus.Text = "已就绪";
                 return;
             }
