@@ -48,12 +48,97 @@ namespace CrabWeighing
         }
     }
 
+    enum ConsoleIcon { None, Scale, Camera, Photo, Scan, Box, Trash }
+
+    static class ConsoleIcons
+    {
+        public static void Draw(Graphics graphics, ConsoleIcon icon, Rectangle box, Color ink)
+        {
+            var state = graphics.Save();
+            graphics.TranslateTransform(box.X, box.Y);
+            graphics.ScaleTransform(box.Width / 24f, box.Height / 24f);
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var pen = new Pen(ink, 1.7f) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+            {
+                switch (icon)
+                {
+                    case ConsoleIcon.Scale:
+                        graphics.DrawRectangle(pen, 3, 4, 18, 16);
+                        graphics.DrawArc(pen, 7, 7, 10, 9, 180, 180);
+                        graphics.DrawLine(pen, 12, 13, 15, 9);
+                        break;
+                    case ConsoleIcon.Camera:
+                        graphics.DrawRectangle(pen, 3, 6, 12, 12);
+                        graphics.DrawPolygon(pen, new[] { new Point(15, 10), new Point(21, 7), new Point(21, 17), new Point(15, 14) });
+                        break;
+                    case ConsoleIcon.Photo:
+                        graphics.DrawRectangle(pen, 3, 4, 18, 16);
+                        graphics.DrawEllipse(pen, 13, 7, 4, 4);
+                        graphics.DrawLines(pen, new[] { new Point(4, 17), new Point(9, 11), new Point(15, 17), new Point(18, 14), new Point(21, 17) });
+                        break;
+                    case ConsoleIcon.Scan:
+                        graphics.DrawLines(pen, new[] { new Point(3, 8), new Point(3, 3), new Point(8, 3) });
+                        graphics.DrawLines(pen, new[] { new Point(16, 3), new Point(21, 3), new Point(21, 8) });
+                        graphics.DrawLines(pen, new[] { new Point(3, 16), new Point(3, 21), new Point(8, 21) });
+                        graphics.DrawLines(pen, new[] { new Point(16, 21), new Point(21, 21), new Point(21, 16) });
+                        graphics.DrawLine(pen, 7, 10, 17, 10);
+                        graphics.DrawLine(pen, 7, 14, 15, 14);
+                        break;
+                    case ConsoleIcon.Box:
+                        graphics.DrawPolygon(pen, new[] { new Point(3, 7), new Point(12, 3), new Point(21, 7), new Point(21, 17), new Point(12, 21), new Point(3, 17) });
+                        graphics.DrawLines(pen, new[] { new Point(3, 7), new Point(12, 11), new Point(21, 7) });
+                        graphics.DrawLine(pen, 12, 11, 12, 21);
+                        break;
+                    case ConsoleIcon.Trash:
+                        graphics.DrawLine(pen, 4, 6, 20, 6);
+                        graphics.DrawLines(pen, new[] { new Point(6, 6), new Point(7, 21), new Point(17, 21), new Point(18, 6) });
+                        graphics.DrawLines(pen, new[] { new Point(9, 6), new Point(9, 3), new Point(15, 3), new Point(15, 6) });
+                        graphics.DrawLine(pen, 10, 10, 10, 17);
+                        graphics.DrawLine(pen, 14, 10, 14, 17);
+                        break;
+                }
+            }
+            graphics.Restore(state);
+        }
+    }
+
     sealed class ConsoleLabel : Label
     {
+        public ConsoleIcon Icon { get; set; }
+        Color statusDot;
+        public Color StatusDot
+        {
+            get { return statusDot; }
+            set
+            {
+                if (statusDot == value) return;
+                statusDot = value;
+                Invalidate();
+            }
+        }
         protected override void OnPaint(PaintEventArgs e)
         {
             Rectangle box = Rectangle.FromLTRB(Padding.Left, Padding.Top,
                 ClientRectangle.Right - Padding.Right, ClientRectangle.Bottom - Padding.Bottom);
+            if (Icon != ConsoleIcon.None)
+            {
+                int unit = ConsolePaint.Pixels(this, 18), inset = ConsolePaint.Pixels(this, 9);
+                ConsolePaint.Tile(e.Graphics, ClientRectangle, inset, BackColor, Color.FromArgb(205, 222, 243));
+                ConsoleIcons.Draw(e.Graphics, Icon, new Rectangle(inset, (Height - unit) / 2, unit, unit), ForeColor);
+                ConsolePaint.Dot(e.Graphics, Width - 2 * inset, (Height - inset) / 2, inset, StatusDot);
+                int start = unit + 2 * inset;
+                int width = Width - start - 3 * inset;
+                int split = Text.IndexOf('\n');
+                string title = split < 0 ? Text : Text.Substring(0, split);
+                string status = split < 0 ? "" : Text.Substring(split + 1);
+                const TextFormatFlags badgeText = TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
+                using (var font = new Font(Font.FontFamily, ConsolePaint.Pixels(this, 14), FontStyle.Bold, GraphicsUnit.Pixel))
+                    TextRenderer.DrawText(e.Graphics, title, font, new Rectangle(start, 0, width, Height / 2 + inset / 2), ForeColor, badgeText);
+                using (var font = new Font(Font.FontFamily, ConsolePaint.Pixels(this, 13), FontStyle.Regular, GraphicsUnit.Pixel))
+                    TextRenderer.DrawText(e.Graphics, status, font, new Rectangle(start, Height / 2, width, Height / 2 - inset / 3), ForeColor, badgeText);
+                return;
+            }
             var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
             if (TextAlign == ContentAlignment.MiddleCenter) flags |= TextFormatFlags.HorizontalCenter;
             else if (TextAlign == ContentAlignment.MiddleRight) flags |= TextFormatFlags.Right;
@@ -111,6 +196,7 @@ namespace CrabWeighing
     sealed class ConsoleButton : Button
     {
         bool hover;
+        public ConsoleIcon Icon { get; set; }
 
         protected override void OnMouseEnter(EventArgs e)
         {
@@ -130,8 +216,20 @@ namespace CrabWeighing
         {
             Color fill = Enabled && hover ? ControlPaint.Light(BackColor, 0.12F) : BackColor;
             e.Graphics.Clear(Parent == null ? fill : Parent.BackColor);
-            ConsolePaint.Tile(e.Graphics, ClientRectangle, 4, fill, ControlPaint.Light(fill, 0.22F));
-            TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, Enabled ? ForeColor : Color.FromArgb(128, 144, 165),
+            ConsolePaint.Tile(e.Graphics, ClientRectangle, ConsolePaint.Pixels(this, 7), fill, ControlPaint.Light(fill, 0.22F));
+            Color ink = Enabled ? ForeColor : Color.FromArgb(128, 144, 165);
+            Rectangle text = ClientRectangle;
+            if (Icon != ConsoleIcon.None)
+            {
+                int unit = ConsolePaint.Pixels(this, 20), gap = ConsolePaint.Pixels(this, 7);
+                int textWidth = string.IsNullOrEmpty(Text) ? 0 : TextRenderer.MeasureText(Text, Font,
+                    Size.Empty, TextFormatFlags.NoPadding).Width + gap;
+                int left = Math.Max(gap, (Width - unit - textWidth) / 2);
+                ConsoleIcons.Draw(e.Graphics, Icon, new Rectangle(left, (Height - unit) / 2, unit, unit), ink);
+                int start = left + unit + gap;
+                text = new Rectangle(start, 0, Math.Max(1, Math.Min(textWidth - gap, Width - gap - start)), Height);
+            }
+            TextRenderer.DrawText(e.Graphics, Text, Font, text, ink,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             if (Focused && ShowFocusCues)
                 ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(ClientRectangle, -3, -3));

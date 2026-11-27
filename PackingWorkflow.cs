@@ -14,9 +14,8 @@ namespace CrabWeighing
     sealed partial class MainForm
     {
         readonly Panel labelPage = new Panel(), packingPage = new Panel();
-        readonly Button backToLabels = ActionButton("↶ 返回分选识别");
         readonly CheckBox[] ruleEnabled = new CheckBox[Basket.Colors.Length];
-        readonly Button labelStep = ActionButton("1. 标签文字 OCR"), packingStep = ActionButton("2. 装箱核对");
+        readonly Button labelStep = ActionButton("1  标签识别"), packingStep = ActionButton("2  装箱核对");
         readonly TextBox taskNumber = new TextBox { Width = 186, MaxLength = 60, BorderStyle = BorderStyle.FixedSingle };
         readonly TextBox rawTranscript = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
             WordWrap = true, BorderStyle = BorderStyle.None };
@@ -34,12 +33,14 @@ namespace CrabWeighing
         readonly Button toggleTranscript = ActionButton("查看原文");
         readonly DataGridView specifications = new DataGridView();
         readonly PictureBox labelImage = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(18, 30, 44) };
-        readonly CheckBox autoCapture = new CheckBox { Text = "自动抓拍", AutoSize = true, Margin = new Padding(3, 9, 5, 3) };
-        readonly Button captureLabels = ActionButton("抓拍并识别  空格");
-        readonly Button confirmLabels = ActionButton("确认标签与规格 · 开始装箱  Enter");
+        readonly Button captureLabels = ActionButton("立即抓拍");
+        readonly Button confirmLabels = ActionButton("确认规格并开始装箱");
         readonly Button photoUpload = ActionButton("上传图片文字识别");
         readonly Button pickCamera = ActionButton("实时视频");
+        readonly Button replacePhoto = ActionButton("选择图片");
+        readonly Label sourceHint = Note("视频已启用自动抓拍");
         Panel settingsContent;
+        bool photoMode, choosingPhoto;
         LabelPhotoResult shownOcr;
         string importedPhoto, captureFile, enteredBy;
         readonly List<string> draftAudit = new List<string>();
@@ -59,19 +60,21 @@ namespace CrabWeighing
             At(bar, icon, 20, 12, 39, 36);
             At(bar, title, 73, 7, 245, 26);
             At(bar, subtitle, 74, 36, 221, 17);
+            ((ConsoleLabel)deviceStatus).Icon = ConsoleIcon.Scale;
+            ((ConsoleLabel)cameraBadge).Icon = ConsoleIcon.Camera;
+            ((ConsoleButton)labelStep).Icon = ConsoleIcon.Scan;
+            ((ConsoleButton)packingStep).Icon = ConsoleIcon.Box;
             deviceStatus.AutoSize = false;
             deviceStatus.BackColor = Color.FromArgb(237, 244, 255);
             deviceStatus.TextAlign = ContentAlignment.MiddleCenter;
             SetBadge(deviceStatus, Color.FromArgb(237, 244, 255), Blue);
             SetBadge(cameraBadge, Color.FromArgb(237, 244, 255), Blue);
-            At(bar, deviceStatus, 468, 13, 145, 33);
-            At(bar, cameraBadge, 623, 13, 166, 33);
+            At(bar, deviceStatus, 374, 9, 166, 42);
+            At(bar, cameraBadge, 550, 9, 226, 42);
             labelStep.Click += (s, e) => ShowPackingPage(false);
             packingStep.Click += (s, e) => { if (order != null) ShowPackingPage(true); else BeginPacking(); };
-            At(bar, labelStep, 798, 10, 149, 39);
-            At(bar, packingStep, 953, 10, 149, 39);
-            backToLabels.Click += (s, e) => ShowPackingPage(false);
-            At(bar, backToLabels, 944, 10, 158, 39);
+            At(bar, labelStep, 796, 7, 150, 45);
+            At(bar, packingStep, 952, 7, 150, 45);
             var settings = ActionButton("⚙");
             settings.AccessibleName = "系统配置";
             settings.Click += (s, e) => OpenSettings();
@@ -122,13 +125,22 @@ namespace CrabWeighing
         {
             var source = Module();
             pickCamera.Click += (s, e) => ShowLivePreview();
-            photoUpload.Click += async (s, e) => await ChooseLabelPhoto();
-            At(source, pickCamera, 12, 6, 125, 37);
-            At(source, photoUpload, 144, 6, 165, 37);
-            At(source, autoCapture, 320, 8, 110, 30);
+            photoUpload.Click += async (s, e) =>
+            {
+                SetLabelSource(true);
+                if (labelImage.Image == null || captureFile != null) await ChooseLabelPhoto();
+            };
+            replacePhoto.Click += async (s, e) => await ChooseLabelPhoto();
+            ((ConsoleButton)pickCamera).Icon = ConsoleIcon.Camera;
+            ((ConsoleButton)photoUpload).Icon = ConsoleIcon.Photo;
+            ((ConsoleButton)replacePhoto).Icon = ConsoleIcon.Photo;
+            ((ConsoleButton)captureLabels).Icon = ConsoleIcon.Scan;
+            ((ConsoleButton)confirmLabels).Icon = ConsoleIcon.Box;
+            At(source, pickCamera, 7, 5, 143, 44);
+            At(source, photoUpload, 156, 5, 211, 44);
             SetBadge(recognitionStatus, Color.FromArgb(234, 245, 251), Blue);
-            At(source, recognitionStatus, 465, 9, 253, 31);
-            At(labelPage, source, 0, 0, 730, 49);
+            At(source, recognitionStatus, 457, 9, 261, 36);
+            At(labelPage, source, 0, 0, 730, 54);
 
             preview.BackColor = Color.FromArgb(16, 30, 45);
             preview.Cursor = Cursors.Cross;
@@ -143,12 +155,14 @@ namespace CrabWeighing
             labelImage.Visible = false;
 
             var videoActions = new Panel { BackColor = Color.FromArgb(17, 30, 43) };
-            var note = Note("框选秤上的箱子区域，或抓拍标签放大核对");
-            note.ForeColor = Color.FromArgb(222, 234, 244);
-            At(videoActions, note, 12, 14, 432, 26);
+            sourceHint.ForeColor = Color.FromArgb(222, 234, 244);
+            At(videoActions, sourceHint, 16, 12, 445, 30);
             SetPrimary(captureLabels, Green);
+            SetPrimary(replacePhoto, Green);
             captureLabels.Click += async (s, e) => await CaptureLabelFrame();
-            At(videoActions, captureLabels, 454, 6, 245, 40);
+            At(videoActions, captureLabels, 484, 4, 216, 44);
+            At(videoActions, replacePhoto, 484, 4, 216, 44);
+            SetLabelSource(false);
             At(labelPage, videoActions, 10, 654, 710, 52);
             videoActions.BringToFront();
 
@@ -177,19 +191,19 @@ namespace CrabWeighing
 
             var parsed = Module();
             At(parsed, Heading("标签解析规格列表"), 12, 10, 270, 25);
-            At(parsed, Note("启用前可编辑"), 344, 12, 146, 24);
+            At(parsed, Note("点按字段即可修改"), 344, 12, 152, 24);
             ConfigureSpecifications();
-            At(parsed, specifications, 10, 45, 489, 233);
+            At(parsed, specifications, 10, 45, 489, 221);
             var add = ActionButton("＋ 手动添加规格");
             add.Click += (s, e) => StartManualGrade();
             var reset = ActionButton("重置解析数据");
             reset.Click += (s, e) => ClearDraft();
-            At(parsed, add, 11, 284, 158, 38);
-            At(parsed, reset, 358, 284, 139, 38);
-            At(labelPage, parsed, 742, 345, 510, 328);
+            At(parsed, add, 11, 271, 174, 44);
+            At(parsed, reset, 352, 271, 145, 44);
+            At(labelPage, parsed, 742, 340, 510, 321);
             SetPrimary(confirmLabels, Green);
             confirmLabels.Click += (s, e) => BeginPacking();
-            At(labelPage, confirmLabels, 742, 679, 510, 37);
+            At(labelPage, confirmLabels, 742, 670, 510, 46);
             return labelPage;
         }
 
@@ -291,48 +305,68 @@ namespace CrabWeighing
 
         void ConfigureSpecifications()
         {
-            StyleGrid(specifications, 40);
+            StyleGrid(specifications, 59);
+            specifications.ColumnHeadersHeight = 38;
+            specifications.DefaultCellStyle.Font = new Font(Font.FontFamily, 17, FontStyle.Regular, GraphicsUnit.Pixel);
+            specifications.RowsDefaultCellStyle.BackColor = Color.FromArgb(246, 249, 254);
+            specifications.AlternatingRowsDefaultCellStyle.BackColor = Color.White;
+            specifications.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
             specifications.BackgroundColor = PanelColor;
             specifications.ReadOnly = false;
             specifications.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
             specifications.SelectionMode = DataGridViewSelectionMode.CellSelect;
             specifications.ScrollBars = ScrollBars.Vertical;
-            var name = new DataGridViewTextBoxColumn { HeaderText = "规格名称", FillWeight = 144, MaxInputLength = 35 };
-            var low = new DataGridViewTextBoxColumn { HeaderText = "起 (g)", FillWeight = 57, MaxInputLength = 8 };
-            var high = new DataGridViewTextBoxColumn { HeaderText = "止 (g)", FillWeight = 57, MaxInputLength = 8 };
-            var color = new DataGridViewComboBoxColumn { HeaderText = "绳色", FillWeight = 72, FlatStyle = FlatStyle.Flat };
+            var name = new DataGridViewTextBoxColumn { HeaderText = "规格名称", FillWeight = 149, MaxInputLength = 35 };
+            var low = new DataGridViewTextBoxColumn { HeaderText = "起 (g)", FillWeight = 70, MaxInputLength = 8 };
+            var high = new DataGridViewTextBoxColumn { HeaderText = "止 (g)", FillWeight = 70, MaxInputLength = 8 };
+            var color = new DataGridViewComboBoxColumn { HeaderText = "绳色", FillWeight = 79, FlatStyle = FlatStyle.Flat };
             color.Items.AddRange(Basket.Colors.Cast<object>().ToArray());
             var count = new DataGridViewTextBoxColumn { HeaderText = "数量", FillWeight = 62, MaxInputLength = 5 };
-            var delete = new DataGridViewButtonColumn { HeaderText = "操作", FillWeight = 62, Text = "删除",
+            var delete = new DataGridViewButtonColumn { HeaderText = "操作", FillWeight = 76, Text = "删除",
                 UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat };
             specifications.Columns.AddRange(name, low, high, color, count, delete);
             foreach (DataGridViewColumn column in specifications.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
-            specifications.CellDoubleClick += (s, e) =>
+            specifications.CellClick += (s, e) =>
             {
-                if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && e.ColumnIndex < 5) specifications.BeginEdit(true);
-            };
-            specifications.CellContentClick += (s, e) =>
-            {
-                if (e.RowIndex >= 0 && e.ColumnIndex == 5) specifications.Rows.RemoveAt(e.RowIndex);
+                if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+                if (e.ColumnIndex == 5)
+                {
+                    specifications.Rows.RemoveAt(e.RowIndex);
+                    return;
+                }
+                if (specifications.CurrentCellAddress != new Point(e.ColumnIndex, e.RowIndex)) return;
+                specifications.BeginEdit(true);
+                var choices = specifications.EditingControl as ComboBox;
+                if (choices != null) choices.DroppedDown = true;
             };
             specifications.CellPainting += (s, e) =>
             {
                 if (e.RowIndex < 0 || e.ColumnIndex < 0 ||
                     (specifications.IsCurrentCellInEditMode && specifications.CurrentCellAddress == new Point(e.ColumnIndex, e.RowIndex))) return;
-                e.PaintBackground(e.ClipBounds, true);
+                Color background = (e.State & DataGridViewElementStates.Selected) != 0 ? Border : PanelColor;
+                using (var brush = new SolidBrush(background)) e.Graphics.FillRectangle(brush, e.CellBounds);
                 int rope = e.ColumnIndex == 3 ? Array.IndexOf(Basket.Colors, Convert.ToString(e.Value)) : -1;
                 bool remove = e.ColumnIndex == 5;
-                if (rope >= 0 || remove)
+                int insetX = ConsolePaint.Pixels(specifications, 3), insetY = ConsolePaint.Pixels(specifications, 6);
+                Rectangle tile = Rectangle.Inflate(e.CellBounds, -insetX, -insetY);
+                Color fill = remove ? RopeFill[0] : rope >= 0 ? RopeFill[rope] : PanelColor;
+                Color textInk = remove ? RopeInk[0] : rope >= 0 ? RopeInk[rope] : Ink;
+                ConsolePaint.Tile(e.Graphics, tile, ConsolePaint.Pixels(specifications, 6), fill, remove || rope >= 0 ? fill : Border);
+                if (remove)
                 {
-                    int inset = ConsolePaint.Pixels(specifications, 6);
-                    Rectangle chip = Rectangle.Inflate(e.CellBounds, -inset, -inset);
-                    Color fill = remove ? PanelColor : RopeFill[rope];
-                    ConsolePaint.Tile(e.Graphics, chip, ConsolePaint.Pixels(specifications, 4), fill, remove ? Border : fill);
+                    int icon = ConsolePaint.Pixels(specifications, 24);
+                    ConsoleIcons.Draw(e.Graphics, ConsoleIcon.Trash, new Rectangle(
+                        tile.Left + (tile.Width - icon) / 2, tile.Top + (tile.Height - icon) / 2, icon, icon), textInk);
                 }
-                TextRenderer.DrawText(e.Graphics, remove ? "删除" : Convert.ToString(e.Value), e.CellStyle.Font ?? Font, e.CellBounds,
-                    remove ? Muted : rope >= 0 ? RopeInk[rope] : Ink, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                else
+                    TextRenderer.DrawText(e.Graphics, Convert.ToString(e.Value), e.CellStyle.Font ?? Font, tile, textInk,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
                 e.Paint(e.ClipBounds, DataGridViewPaintParts.Border | DataGridViewPaintParts.Focus);
                 e.Handled = true;
+            };
+            specifications.CellToolTipTextNeeded += (s, e) =>
+            {
+                if (e.RowIndex >= 0 && e.ColumnIndex == 5) e.ToolTipText = "删除此规格";
             };
             specifications.Dock = DockStyle.None;
         }
@@ -356,17 +390,40 @@ namespace CrabWeighing
 
         async Task ChooseLabelPhoto()
         {
-            if (importingLabel) return;
-            using (var file = new OpenFileDialog { Title = "上传泡沫箱标签照片", Filter = "图片|*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff",
-                CheckFileExists = true, RestoreDirectory = true })
-                if (file.ShowDialog(this) == DialogResult.OK) await ReadLabelPhoto(file.FileName, false);
+            if (importingLabel || choosingPhoto) return;
+            SetLabelSource(true);
+            choosingPhoto = true;
+            try
+            {
+                using (var file = new OpenFileDialog { Title = "上传泡沫箱标签照片", Filter = "图片|*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff",
+                    CheckFileExists = true, RestoreDirectory = true })
+                    if (file.ShowDialog(this) == DialogResult.OK) await ReadLabelPhoto(file.FileName, false);
+            }
+            finally { choosingPhoto = false; }
+        }
+
+        void SetLabelSource(bool usePhoto)
+        {
+            photoMode = usePhoto;
+            SetPrimary(usePhoto ? photoUpload : pickCamera, Blue);
+            Button inactive = usePhoto ? pickCamera : photoUpload;
+            inactive.BackColor = Color.FromArgb(237, 244, 255);
+            inactive.ForeColor = Muted;
+            captureLabels.Visible = !usePhoto;
+            replacePhoto.Visible = usePhoto;
+            sourceHint.Text = usePhoto ? "选择标签照片，也可将照片拖入画面" : "实时视频自动抓拍标签";
+            labelImage.Visible = usePhoto;
+            preview.Visible = !usePhoto;
         }
 
         void ShowLivePreview()
         {
-            labelImage.Visible = false;
-            preview.Visible = true;
-            if (camera != null) return;
+            SetLabelSource(false);
+            if (camera != null && !camera.Ended)
+            {
+                if (camera.Error == null) return;
+                CloseCamera("正在重新连接视频");
+            }
             if (cameraType.SelectedIndex == (int)CameraSource.File && address.Text.Length == 0) SelectVideoFile();
             if (cameraType.SelectedIndex != (int)CameraSource.File || address.Text.Length > 0) ToggleCamera();
         }
@@ -394,7 +451,8 @@ namespace CrabWeighing
         {
             if (importingLabel) return;
             importingLabel = true;
-            captureLabels.Enabled = photoUpload.Enabled = confirmLabels.Enabled = false;
+            if (!captured) SetLabelSource(true);
+            pickCamera.Enabled = replacePhoto.Enabled = captureLabels.Enabled = photoUpload.Enabled = confirmLabels.Enabled = false;
             recognitionStatus.Text = "正在识别整图和标签分区…";
             try
             {
@@ -429,7 +487,7 @@ namespace CrabWeighing
             finally
             {
                 importingLabel = false;
-                if (!closing) captureLabels.Enabled = photoUpload.Enabled = confirmLabels.Enabled = true;
+                if (!closing) pickCamera.Enabled = replacePhoto.Enabled = captureLabels.Enabled = photoUpload.Enabled = confirmLabels.Enabled = true;
             }
         }
 
@@ -485,7 +543,16 @@ namespace CrabWeighing
 
         void DrawLabelHighlights(object sender, PaintEventArgs e)
         {
-            if (shownOcr == null || labelImage.Image == null) return;
+            if (labelImage.Image == null)
+            {
+                int size = ConsolePaint.Pixels(this, 44);
+                ConsoleIcons.Draw(e.Graphics, ConsoleIcon.Photo,
+                    new Rectangle((labelImage.Width - size) / 2, labelImage.Height / 2 - 2 * size, size, size), Color.White);
+                TextRenderer.DrawText(e.Graphics, "选择泡沫箱标签照片", labelImage.Font, labelImage.ClientRectangle, Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                return;
+            }
+            if (shownOcr == null) return;
             Image image = labelImage.Image;
             float scale = Math.Min(labelImage.Width / (float)image.Width, labelImage.Height / (float)image.Height);
             float width = image.Width * scale, height = image.Height * scale;
@@ -534,8 +601,7 @@ namespace CrabWeighing
             draftAudit.Clear();
             shownOcr = null;
             ReleaseOcrPhoto();
-            labelImage.Visible = false;
-            preview.Visible = true;
+            SetLabelSource(photoMode);
             SetBadge(recognitionStatus, RopeFill[2], Blue);
             recognitionStatus.Text = "等待上传照片或抓拍";
         }
@@ -693,8 +759,6 @@ namespace CrabWeighing
         {
             if (packingActive && !packing) baselineFrame = null;
             packingActive = packing;
-            labelStep.Visible = packingStep.Visible = !packing;
-            backToLabels.Visible = packing;
             labelPage.Visible = !packing;
             packingPage.Visible = packing;
             if (packing) packingPage.BringToFront();
@@ -715,18 +779,20 @@ namespace CrabWeighing
             if (!simulationOpen && !scale.IsOpen) liveState = "电子秤未连接";
             weightState.Text = packingWeightState.Text = liveState;
             weightState.ForeColor = packingWeightState.ForeColor = weight != null && weight.Valid && weight.Stable ? Green : Muted;
-            if (!packingActive && autoCapture.Checked && displayed != null && !importingLabel && !labelImage.Visible &&
-                specifications.Rows.Count == 0 && now >= nextCapture && camera.Source != CameraSource.Demo)
+            if (!packingActive && !photoMode && !choosingPhoto && !importingLabel && !labelImage.Visible &&
+                !choosingOrder && settingsContent.Parent == null && specifications.Rows.Count == 0 && now >= nextCapture &&
+                camera != null && !camera.Ended && camera.Source != CameraSource.Demo &&
+                displayed != null && CaptureGate.Elapsed(now, displayed.Tick) <= 1)
             {
                 nextCapture = now + 8 * Stopwatch.Frequency;
-                CaptureAutomatically(true);
+                CaptureAutomatically();
             }
         }
 
-        async void CaptureAutomatically(bool keepScanning = false)
+        async void CaptureAutomatically()
         {
             await CaptureLabelFrame();
-            if (keepScanning && !closing && specifications.Rows.Count == 0 && autoCapture.Checked)
+            if (!closing && !photoMode && specifications.Rows.Count == 0)
             {
                 labelImage.Visible = false;
                 preview.Visible = true;
@@ -1120,13 +1186,5 @@ namespace CrabWeighing
             catch (UnauthorizedAccessException) { }
         }
 
-        protected override void OnKeyDown(KeyEventArgs e)
-        {
-            base.OnKeyDown(e);
-            if (packingActive || importingLabel || settingsContent.Parent != null || specifications.IsCurrentCellInEditMode ||
-                e.Modifiers != Keys.None || ActiveControl is TextBoxBase || ActiveControl is ComboBox || ActiveControl is Button) return;
-            if (e.KeyCode == Keys.Space) { CaptureAutomatically(); e.SuppressKeyPress = true; }
-            if (e.KeyCode == Keys.Enter) { BeginPacking(); e.SuppressKeyPress = true; }
-        }
     }
 }

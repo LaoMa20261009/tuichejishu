@@ -113,7 +113,6 @@ namespace CrabWeighing
         public MainForm()
         {
             Text = "螃蟹装箱计数系统";
-            KeyPreview = true;
             AutoSize = false;
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None;
@@ -154,6 +153,10 @@ namespace CrabWeighing
                 ledger.RowTemplate.Height = (int)Math.Round(42 * factor);
                 ScaleGridFont(ledger.ColumnHeadersDefaultCellStyle, factor);
                 ScaleGridFont(ledger.DefaultCellStyle, factor);
+                specifications.ColumnHeadersHeight = (int)Math.Round(specifications.ColumnHeadersHeight * factor);
+                specifications.RowTemplate.Height = (int)Math.Round(specifications.RowTemplate.Height * factor);
+                ScaleGridFont(specifications.ColumnHeadersDefaultCellStyle, factor);
+                ScaleGridFont(specifications.DefaultCellStyle, factor);
             }
             Bounds = openingBounds;
             fixedWindowSize = openingBounds.Size;
@@ -532,8 +535,10 @@ namespace CrabWeighing
                 bool cameraReady = camera != null && !camera.Ended && displayed != null;
                 SetBadge(deviceStatus, RopeFill[scaleReady ? 1 : 2], scaleReady ? Green : Blue);
                 SetBadge(cameraBadge, RopeFill[cameraReady ? 1 : 2], cameraReady ? Green : Blue);
-                deviceStatus.Text = "电子秤  " + scaleConnection;
-                cameraBadge.Text = "工业相机  " + cameraConnection;
+                ((ConsoleLabel)deviceStatus).StatusDot = scaleReady ? Green : Muted;
+                ((ConsoleLabel)cameraBadge).StatusDot = cameraReady ? Green : Muted;
+                deviceStatus.Text = "电子秤\n" + scaleConnection;
+                cameraBadge.Text = "工业相机\n" + cameraConnection;
                 RefreshWorkflow(now, weight);
                 RefreshRecording(now, weight, frameTick);
             }
